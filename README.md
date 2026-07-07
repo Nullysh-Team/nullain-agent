@@ -96,12 +96,12 @@ que amplifica o loop agêntico em fluxos de engenharia de ponta a ponta.
 
 ## ◻ Quick start
 
-git clone https://github.com/Nullysh-Team/nullain-agent.git
-cd nullain-agent
-cp .env.example .env      # defina o modelo + a chave do provider
-uv sync
-uv run nullain chat       # núcleo no terminal
-uv run nullain serve      # API + dashboard de controle
+> git clone https://github.com/Nullysh-Team/nullain-agent.git
+> cd nullain-agent
+> cp .env.example .env      # defina o modelo + a chave do provider
+> uv sync
+> uv run nullain chat       # núcleo no terminal
+> uv run nullain serve      # API + dashboard de controle
 
 
 ## ◻ Roadmap
