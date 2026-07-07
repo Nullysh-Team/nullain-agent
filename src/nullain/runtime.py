@@ -13,4 +13,6 @@ def get_active_model() -> str:
 def get_active_temperature() -> float | None:
     runtime = memory.get_runtime_config()
     temperature = runtime.get("temperature")
-    return temperature if isinstance(temperature, float) else None
+    if isinstance(temperature, (int, float)) and not isinstance(temperature, bool):
+        return float(temperature)
+    return None

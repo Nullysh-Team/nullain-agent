@@ -149,6 +149,10 @@ def execute_tool(
     arguments: dict[str, Any],
     confirm: ConfirmFn | None = None,
 ) -> str:
+    parse_error = arguments.get("__parse_error__")
+    if isinstance(parse_error, str):
+        return parse_error
+
     entry = TOOL_REGISTRY.get(name)
     if entry is None:
         return f"Erro: tool desconhecida: {name}"
@@ -173,4 +177,7 @@ def execute_tool(
 def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
     if not raw_arguments:
         return {}
-    return json.loads(raw_arguments)
+    try:
+        return json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        return {"__parse_error__": f"Erro: argumentos JSON inválidos: {exc}"}

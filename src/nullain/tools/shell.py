@@ -8,9 +8,14 @@ TIMEOUT_SECONDS = 60
 
 
 def run_command(cmd: str, confirm: ConfirmFn | None = None) -> str:
+    if confirm is None:
+        return (
+            "Erro: esta operação exige confirmação, mas nenhum confirmador foi fornecido."
+        )
+
     preview = f"Comando a executar:\n\n{cmd}"
 
-    if confirm is not None and not confirm(preview):
+    if not confirm(preview):
         return "Operação cancelada pelo usuário."
 
     try:

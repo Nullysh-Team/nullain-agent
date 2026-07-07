@@ -19,13 +19,12 @@ from nullain.persona import get_base_prompt, get_system_message
 from nullain.runtime import get_active_model
 from nullain.tools import TOOL_REGISTRY
 
+ALLOWED_ORIGINS = {"http://127.0.0.1:5173", "http://localhost:5173"}
+
 app = FastAPI(title="NULLAIN API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-    ],
+    allow_origins=list(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -253,6 +252,11 @@ def voice_speak(payload: VoiceSpeakRequest) -> Response:
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket) -> None:
+    origin = websocket.headers.get("origin")
+    if origin not in ALLOWED_ORIGINS:
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
 
     session_id = str(uuid.uuid4())
