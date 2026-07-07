@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets and local data
+.env
+nullain.db
+mcp.config.json
+
+# Frontend (future phases)
+node_modules/
+dashboard/dist/
+
+# Voice models
+models/
+*.onnx
+*.onnx.json
+
+# Local dev / IDE
+terminals/
+mcps/
+.grok/
