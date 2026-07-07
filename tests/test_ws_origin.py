@@ -1,11 +1,13 @@
 import pytest
 from starlette.testclient import TestClient
 
-from nullain import server
+from nullain import memory, server
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
+    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
+    memory.init_db()
     monkeypatch.setattr(server.brain, "startup", lambda: (0, 0))
     monkeypatch.setattr(server.brain, "shutdown", lambda: None)
     with TestClient(server.app) as test_client:
