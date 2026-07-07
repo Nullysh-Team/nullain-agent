@@ -3,7 +3,7 @@
 version: 2.1
 orbs:
   node: circleci/node@5
-  python: circleci/python@2
+  python: circleci/python@4
 jobs:
   build-node:
     # Build node project
@@ -32,10 +32,11 @@ jobs:
       - image: cimg/python:3.13-node
     steps:
       - checkout
-      - python/install-packages
+      - python/install-packages:
+          pkg-manager: uv
       - run:
           name: Run tests
-          command: pytest --junitxml=junit.xml || ((($? == 5)) && echo 'Did not find any tests to run.')
+          command: uv run pytest --junitxml=junit.xml || ((($? == 5)) && echo 'Did not find any tests to run.')
       - store_test_results:
           path: junit.xml
   deploy:
