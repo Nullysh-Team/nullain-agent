@@ -276,12 +276,16 @@ class McpManager:
             return f"Erro: servidor MCP desconectado: {binding.server_name}"
 
         if binding.needs_confirmation:
+            if confirm is None:
+                return (
+                    "Erro: esta operação exige confirmação, mas nenhum confirmador foi fornecido."
+                )
             preview = (
                 f"Servidor MCP: {binding.server_name}\n"
                 f"Tool: {binding.tool_name}\n"
                 f"Argumentos:\n{json.dumps(arguments, indent=2, ensure_ascii=False)}"
             )
-            if confirm is not None and not confirm(preview):
+            if not confirm(preview):
                 return "Operação cancelada pelo usuário."
 
         result = await connection.session.call_tool(binding.tool_name, arguments=arguments)

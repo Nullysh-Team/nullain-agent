@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from typing import Any
 
 from nullain.mcp_client import CONFIG_PATH
