@@ -1,0 +1,30 @@
+version: 2.1
+
+jobs:
+  test:
+    docker:
+      - image: cimg/python:3.13
+    steps:
+      - checkout
+      - run:
+          name: Install uv
+          command: |
+            curl -LsSf https://astral.sh/uv/install.sh | sh
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Install dependencies
+          command: uv sync --group dev
+      - run:
+          name: Ruff
+          command: uv run ruff check src tests
+      - run:
+          name: Pytest
+          command: uv run pytest -q --junitxml=junit.xml
+      - store_test_results:
+          path: junit.xml
+          when: always
+
+workflows:
+  ci:
+    jobs:
+      - test
