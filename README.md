@@ -49,6 +49,8 @@ Provider-agnostic: alterne entre modelos de nuvem (pagos ou free-tier) e
 modelos locais sem tocar no código. **Você controla o cérebro, as chaves e os
 dados.**
 
+<img width="737" height="114" alt="Nullain-Skills" src="https://github.com/user-attachments/assets/a5099f3c-5268-4708-ae3e-2d16ca93d1f9" />
+
 ## ▪ NULLAIN-SKILLS — camada de capacidades
 
 Sistema modular de habilidades plugáveis. Cada skill é uma unidade de
@@ -59,6 +61,9 @@ capacidade que o núcleo registra, descreve para o modelo e invoca em runtime:
 - ▫ **Skills extensíveis** — novas capacidades entram no registro sem reescrever o núcleo.
 - ▫ **Percepção** — visão computacional (OCR, captura de tela), acesso e coleta na web.
 - ▫ **Voz offline** — transcrição e síntese locais, sem tráfego externo de áudio.
+
+<img width="2752" height="692" alt="banner - Copia" src="https://github.com/user-attachments/assets/73deb5af-ae63-4f3b-b23a-730bae991ef8" />
+
 
 ## ▪ NULLAIN-SQUADS — orquestração multi-agente
 
