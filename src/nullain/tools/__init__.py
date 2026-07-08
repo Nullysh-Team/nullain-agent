@@ -1,4 +1,5 @@
 import json
+import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -108,6 +109,84 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = dict(NATIVE_TOOL_REGISTRY)
 _mcp_manager = None
 
 
+class ToolRegistry:
+    def __init__(
+        self,
+        tools: dict[str, dict[str, Any]],
+        *,
+        mcp_manager: Any | None = None,
+        confirm_all: bool = False,
+    ) -> None:
+        self._tools = tools
+        self._mcp_manager = mcp_manager
+        self.confirm_all = confirm_all
+
+    def get(self, name: str) -> dict[str, Any] | None:
+        return self._tools.get(name)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._tools
+
+    def schemas(self) -> list[dict[str, Any]]:
+        return [entry["schema"] for entry in self._tools.values()]
+
+    def _confirmation_preview(self, name: str, arguments: dict[str, Any]) -> str:
+        return f"Tool: {name}\nArgumentos:\n{json.dumps(arguments, indent=2, ensure_ascii=False)}"
+
+    def _enforce_extra_confirmation(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        confirm: ConfirmFn | None,
+    ) -> str | None:
+        if confirm is None:
+            return "Erro: esta operação exige confirmação, mas nenhum confirmador foi fornecido."
+        if not confirm(self._confirmation_preview(name, arguments)):
+            return "Operação cancelada pelo usuário."
+        return None
+
+    def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        confirm: ConfirmFn | None = None,
+    ) -> str:
+        parse_error = arguments.get("__parse_error__")
+        if isinstance(parse_error, str):
+            return parse_error
+
+        entry = self._tools.get(name)
+        if entry is None:
+            return f"Erro: tool desconhecida: {name}"
+
+        native_needs_confirmation = bool(entry.get("needs_confirmation"))
+
+        if entry.get("source") == "mcp":
+            if self._mcp_manager is None:
+                return "Erro: MCP não conectado."
+            if self.confirm_all and not native_needs_confirmation:
+                blocked = self._enforce_extra_confirmation(name, arguments, confirm)
+                if blocked is not None:
+                    return blocked
+            return self._mcp_manager.call_tool_sync(name, arguments, confirm)
+
+        fn: ToolFn = entry["fn"]
+
+        try:
+            if self.confirm_all and not native_needs_confirmation:
+                blocked = self._enforce_extra_confirmation(name, arguments, confirm)
+                if blocked is not None:
+                    return blocked
+                return fn(**arguments)
+            if native_needs_confirmation:
+                return fn(**arguments, confirm=confirm)
+            return fn(**arguments)
+        except TypeError as exc:
+            return f"Erro: argumentos inválidos para {name}: {exc}"
+        except Exception as exc:
+            return f"Erro ao executar {name}: {exc}"
+
+
 def init_tools(mcp_manager=None) -> int:
     global _mcp_manager, TOOL_REGISTRY
 
@@ -140,8 +219,22 @@ def shutdown_tools() -> None:
     TOOL_REGISTRY = dict(NATIVE_TOOL_REGISTRY)
 
 
+def default_registry() -> ToolRegistry:
+    return ToolRegistry(dict(TOOL_REGISTRY), mcp_manager=_mcp_manager)
+
+
+def restricted(names: list[str]) -> ToolRegistry:
+    subset: dict[str, dict[str, Any]] = {}
+    for name in names:
+        if name in TOOL_REGISTRY:
+            subset[name] = TOOL_REGISTRY[name]
+        else:
+            warnings.warn(f"Tool ignorada no registry restrito: {name}", stacklevel=2)
+    return ToolRegistry(subset, mcp_manager=_mcp_manager)
+
+
 def get_tool_schemas() -> list[dict[str, Any]]:
-    return [entry["schema"] for entry in TOOL_REGISTRY.values()]
+    return default_registry().schemas()
 
 
 def execute_tool(
@@ -149,29 +242,7 @@ def execute_tool(
     arguments: dict[str, Any],
     confirm: ConfirmFn | None = None,
 ) -> str:
-    parse_error = arguments.get("__parse_error__")
-    if isinstance(parse_error, str):
-        return parse_error
-
-    entry = TOOL_REGISTRY.get(name)
-    if entry is None:
-        return f"Erro: tool desconhecida: {name}"
-
-    if entry.get("source") == "mcp":
-        if _mcp_manager is None:
-            return "Erro: MCP não conectado."
-        return _mcp_manager.call_tool_sync(name, arguments, confirm)
-
-    fn: ToolFn = entry["fn"]
-
-    try:
-        if entry["needs_confirmation"]:
-            return fn(**arguments, confirm=confirm)
-        return fn(**arguments)
-    except TypeError as exc:
-        return f"Erro: argumentos inválidos para {name}: {exc}"
-    except Exception as exc:
-        return f"Erro ao executar {name}: {exc}"
+    return default_registry().execute(name, arguments, confirm)
 
 
 def parse_tool_arguments(raw_arguments: str) -> dict[str, Any]:
