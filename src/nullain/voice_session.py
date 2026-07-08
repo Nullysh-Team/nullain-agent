@@ -13,6 +13,7 @@ from nullain.persona import get_system_message
 from nullain.runtime import get_active_model
 from nullain.voice.audio import play_wav_bytes, record_seconds
 from nullain.voice.stt import transcribe_file
+from nullain.ui.spinner import status
 from nullain.voice.tts import resolve_piper_model_path, synthesize_wav_bytes
 
 
@@ -73,9 +74,9 @@ def _voice_loop(
 
         if not user_input.strip():
             try:
-                with console.status("[bold]Gravando...[/bold]"):
+                with status(console, "thinking", text="[bold]Gravando...[/bold]"):
                     audio_path = record_seconds()
-                with console.status("[bold]Transcrevendo...[/bold]"):
+                with status(console, "thinking", text="[bold]Transcrevendo...[/bold]"):
                     user_text = transcribe_file(audio_path)
                 os.remove(audio_path)
             except Exception as exc:
@@ -94,13 +95,12 @@ def _voice_loop(
         memory.add_message(session_id, "user", user_text)
 
         try:
-            with console.status("[bold]NULLAIN pensando...[/bold]"):
-                response = run_agent(
-                    messages,
-                    confirm=lambda preview: confirm_action(console, preview),
-                    console=console,
-                    session_id=session_id,
-                )
+            response = run_agent(
+                messages,
+                confirm=lambda preview: confirm_action(console, preview),
+                console=console,
+                session_id=session_id,
+            )
         except KeyboardInterrupt:
             console.print("\n[dim]Interrompido.[/dim]")
             messages.pop()
@@ -122,7 +122,7 @@ def _voice_loop(
         )
 
         try:
-            with console.status("[bold]Falando...[/bold]"):
+            with status(console, "thinking", text="[bold]Falando...[/bold]"):
                 wav = synthesize_wav_bytes(response)
                 play_wav_bytes(wav)
         except Exception as exc:

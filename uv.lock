@@ -9,6 +9,21 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agents-are-thinking"
+version = "0.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/da/043c47fba5882b3e1af2e80bd18232ff81b13d1380286ae1447743dde164/agents_are_thinking-0.2.3.tar.gz", hash = "sha256:65bfd2f70f6cbb29a6347d7cb8c060ba353a824980a0b0530d48ec3ffc2394ed", size = 22939, upload-time = "2026-05-11T15:59:53.795Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/bd/817a70b2b2434898a34b497f223422eb8982c69a38320b353279442b78ac/agents_are_thinking-0.2.3-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:94cccf3b88d1e370b32fbef8f81ed668679e8d31b47827855a111c436d8e9904", size = 300774, upload-time = "2026-05-11T15:59:42.642Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/4f/07f1cad644644bb2572e372b5d57e953b144d2146c0dc73f5503f93e3b03/agents_are_thinking-0.2.3-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:8e3123dd0240969bc09aad7ecc6d26c590407032eefc93caf4990b6c494df45e", size = 342002, upload-time = "2026-05-11T15:59:43.959Z" },
+    { url = "https://files.pythonhosted.org/packages/b5/e0/6ae7aa610712f5a5545042de8aa52d2a4273fb1dbd4bca4fd3251eedd81f/agents_are_thinking-0.2.3-cp313-cp313-win_amd64.whl", hash = "sha256:b3c589172aa2c5320cd130ea2623a2da946a0d28050134e6d84a2f13a4db63ff", size = 179298, upload-time = "2026-05-11T15:59:45.625Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/ec/4eac9dda1fa64741a95375549580bb15519cf75312b21819175f984c6139/agents_are_thinking-0.2.3-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:b252b068ce4a3b57ab875c953c2f80cc56c9f8f2a5ac38d0ac51398986883e8d", size = 301386, upload-time = "2026-05-11T15:59:46.94Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/19/1afed54fd0c9db1f2103c8b9f3fd4d273fa031adebaa6536dbfc0e129540/agents_are_thinking-0.2.3-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4fba072587c08b8886c2deee879bff1fb78a6fc206c88f1b885720fa163d70c7", size = 342430, upload-time = "2026-05-11T15:59:48.121Z" },
+    { url = "https://files.pythonhosted.org/packages/93/23/4802708a768c45c34aad4ac16bcbd8fb36582080c9d3d2166fa007290862/agents_are_thinking-0.2.3-cp314-cp314-win_amd64.whl", hash = "sha256:50e5a535b20b5b6132e235c807514fd3904c63db08ffdc320e3478b6fc76999a", size = 179348, upload-time = "2026-05-11T15:59:49.571Z" },
+    { url = "https://files.pythonhosted.org/packages/21/fc/7d1b5e2df7ebaa0f9ecf9c51886b8a63eeac6fc233799d8839a9198a74c8/agents_are_thinking-0.2.3-cp315-cp315-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:abd0098cba5f201efb21b21f897c046d8abc250fce5c6b9819d66bf94fc56aee", size = 342611, upload-time = "2026-05-11T15:59:50.961Z" },
+]
+
+[[package]]
 name = "aiohappyeyeballs"
 version = "2.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1026,6 +1041,7 @@ name = "nullain"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agents-are-thinking" },
     { name = "fastapi" },
     { name = "faster-whisper" },
     { name = "litellm" },
@@ -1049,6 +1065,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agents-are-thinking", specifier = ">=0.1.0" },
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "faster-whisper", specifier = ">=1.1.0" },
     { name = "litellm", specifier = ">=1.91.0" },

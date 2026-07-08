@@ -4,10 +4,12 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.table import Table
 
 from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain.cli_helpers import confirm_action, handle_memory_command
+from nullain.doctor import run_checks
 from nullain.persona import get_system_message
 from nullain.runtime import get_active_model
 from nullain import memory
@@ -97,6 +99,30 @@ def voice_setup() -> None:
         check=True,
     )
     console.print("[green]Voz Piper pronta.[/green]")
+
+
+@app.command("doctor")
+def doctor() -> None:
+    """Diagnostica o ambiente local do NULLAIN."""
+    results = run_checks()
+
+    table = Table(title="NULLAIN Doctor", show_header=True, header_style="bold")
+    table.add_column("", width=3)
+    table.add_column("Check")
+    table.add_column("Detalhe")
+    table.add_column("Dica", style="dim")
+
+    for result in results:
+        table.add_row(
+            "✓" if result.ok else "✗",
+            result.name,
+            result.detail,
+            result.hint,
+        )
+
+    console.print(table)
+    ok_count = sum(1 for result in results if result.ok)
+    console.print(f"{ok_count}/{len(results)} checks OK")
 
 
 @app.command("serve")

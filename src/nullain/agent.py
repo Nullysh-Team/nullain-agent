@@ -2,7 +2,6 @@ import json
 import re
 import uuid
 from collections.abc import Callable
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +10,7 @@ from rich.console import Console
 from nullain import memory
 from nullain.history import trim_history
 from nullain.llm import complete, complete_stream
+from nullain.ui.spinner import status
 from nullain.tools import (
     TOOL_REGISTRY,
     execute_tool,
@@ -153,12 +153,6 @@ def run_agent(
 
         _emit(on_event, {"type": "thinking"})
 
-        status_ctx = (
-            console.status("[bold]NULLAIN pensando...[/bold]")
-            if console is not None
-            else nullcontext()
-        )
-
         streamed_to_console = False
 
         def _on_chunk(chunk: str) -> None:
@@ -168,7 +162,7 @@ def run_agent(
                 console.print(chunk, end="")
                 streamed_to_console = True
 
-        with status_ctx:
+        with status(console, "thinking"):
             try:
                 response = complete_stream(
                     messages,
@@ -200,7 +194,8 @@ def run_agent(
                     },
                 )
 
-                result = execute_tool(tool_call.name, arguments, confirm=confirm)
+                with status(console, "tool_call"):
+                    result = execute_tool(tool_call.name, arguments, confirm=confirm)
                 memory.log_tool_call(
                     tool_call.name,
                     arguments,

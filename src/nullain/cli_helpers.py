@@ -4,6 +4,7 @@ from rich.table import Table
 
 from nullain import memory
 from nullain.persona import get_system_message
+from nullain.ui.spinner import status
 
 
 def confirm_action(console: Console, preview: str) -> bool:
@@ -15,7 +16,8 @@ def confirm_action(console: Console, preview: str) -> bool:
         )
     )
     try:
-        answer = console.input("Continuar? [s/N] ").strip().lower()
+        with status(console, "confirmation"):
+            answer = console.input("Continuar? [s/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         console.print("\n[dim]Operação cancelada.[/dim]")
         return False
