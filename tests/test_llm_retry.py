@@ -38,7 +38,11 @@ def test_complete_retries_transient_errors(monkeypatch):
     monkeypatch.setattr(llm.time, "sleep", lambda seconds: sleeps.append(seconds))
     monkeypatch.setattr(llm.random, "uniform", lambda _a, _b: 0.25)
 
-    response = llm.complete([{"role": "user", "content": "oi"}])
+    response = llm.complete(
+        [{"role": "user", "content": "oi"}],
+        model="test-model",
+        temperature=0.0,
+    )
 
     assert response.choices[0].message.content == "sucesso"
     assert calls["count"] == 3
@@ -66,7 +70,11 @@ def test_complete_does_not_retry_authentication_error(monkeypatch):
     )
 
     try:
-        llm.complete([{"role": "user", "content": "oi"}])
+        llm.complete(
+            [{"role": "user", "content": "oi"}],
+            model="test-model",
+            temperature=0.0,
+        )
         raised = False
     except AuthenticationError:
         raised = True
