@@ -1,7 +1,14 @@
+import pytest
 import litellm
 from litellm.exceptions import AuthenticationError, RateLimitError
 
 from nullain import llm
+
+
+@pytest.fixture(autouse=True)
+def _stub_runtime(monkeypatch):
+    monkeypatch.setattr(llm, "get_active_model", lambda: "test-model")
+    monkeypatch.setattr(llm, "get_active_temperature", lambda: 0.0)
 
 
 class _FakeMessage:
