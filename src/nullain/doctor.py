@@ -16,7 +16,6 @@ from nullain.env_tokens import ENV_PATH, KNOWN_TOKEN_KEYS
 from nullain.mcp_client import CONFIG_PATH
 from nullain.mcp_config_store import list_servers
 from nullain.runtime import get_active_model
-from nullain.voice.tts import resolve_piper_model_path
 
 DEFAULT_PORT = 8420
 _OLLAMA_URL = "http://127.0.0.1:11434"
@@ -107,6 +106,8 @@ def _check_ollama() -> CheckResult:
 
 
 def _check_piper_model() -> CheckResult:
+    from nullain.voice.tts import resolve_piper_model_path
+
     path = resolve_piper_model_path()
     return CheckResult("Modelo Piper", True, str(path), "")
 
