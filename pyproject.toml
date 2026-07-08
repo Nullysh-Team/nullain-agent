@@ -15,6 +15,7 @@ dependencies = [
     "mcp>=1.27,<2",
     "numpy>=2.0.0",
     "piper-tts>=1.4.0",
+    "pysqlite3-binary>=0.5.4.post2; sys_platform == 'linux'",
     "pydantic-settings>=2.14.2",
     "python-multipart>=0.0.20",
     "rich>=15.0.0",
