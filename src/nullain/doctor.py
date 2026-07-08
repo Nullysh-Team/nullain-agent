@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import socket
+import sqlite3
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ class CheckResult:
     ok: bool
     detail: str
     hint: str = ""
+    mandatory: bool = True
 
 
 def _env_key_present(key: str) -> bool:
@@ -43,6 +45,20 @@ def _env_key_present(key: str) -> bool:
         if match and match.group(1).strip():
             return True
     return False
+
+
+def status_mark(result: CheckResult) -> str:
+    if result.mandatory:
+        return "✓" if result.ok else "✗"
+    if result.detail == "—" or result.detail.startswith("inativa"):
+        return "—"
+    return "✓"
+
+
+def score_summary(results: list[CheckResult]) -> tuple[int, int]:
+    mandatory = [result for result in results if result.mandatory]
+    ok_count = sum(1 for result in mandatory if result.ok)
+    return ok_count, len(mandatory)
 
 
 def _run_check(name: str, checker: Callable[[], CheckResult]) -> CheckResult:
@@ -72,11 +88,14 @@ def _check_env_file() -> CheckResult:
 
 def _check_token_key(key: str) -> CheckResult:
     present = _env_key_present(key)
+    if present:
+        return CheckResult(f"Token {key}", True, "presente", mandatory=False)
     return CheckResult(
         f"Token {key}",
-        present,
-        "presente" if present else "ausente",
-        "" if present else f"Defina {key} no .env se for usar esse provider.",
+        True,
+        "—",
+        hint=f"Opcional: defina {key} no .env se for usar esse provider.",
+        mandatory=False,
     )
 
 
@@ -113,24 +132,78 @@ def _check_piper_model() -> CheckResult:
 
 
 def _check_sqlite() -> CheckResult:
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        test_path = Path(tmp_dir) / "doctor.db"
-        original_path = memory.DB_PATH
-        memory.DB_PATH = test_path
-        try:
-            memory.init_db()
-            memory.set_setting("_doctor_probe", "ok")
-            value = memory.get_setting("_doctor_probe")
-            ok = value == "ok"
-            detail = "leitura/escrita OK" if ok else "falha na leitura"
-        finally:
-            memory.DB_PATH = original_path
+    test_path: Path | None = None
+    conn: sqlite3.Connection | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp_file:
+            test_path = Path(tmp_file.name)
+
+        conn = sqlite3.connect(test_path)
+        conn.execute("CREATE TABLE doctor_probe (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute(
+            "INSERT INTO doctor_probe (key, value) VALUES (?, ?)",
+            ("probe", "ok"),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT value FROM doctor_probe WHERE key = ?",
+            ("probe",),
+        ).fetchone()
+        ok = row is not None and row[0] == "ok"
+        detail = "leitura/escrita OK" if ok else "falha na leitura"
+        hint = "" if ok else "Verifique permissões de escrita no diretório temporário."
+        return CheckResult("Banco SQLite", ok, detail, hint)
+    except Exception as exc:
+        return CheckResult(
+            "Banco SQLite",
+            False,
+            str(exc),
+            "Verifique permissões de escrita no diretório temporário.",
+        )
+    finally:
+        if conn is not None:
+            conn.close()
+        if test_path is not None:
+            test_path.unlink(missing_ok=True)
+
+
+def _check_semantic_search() -> CheckResult:
+    from nullain.config import get_settings
+
+    model = get_settings().nullain_embed_model.strip()
+    if not model:
+        return CheckResult(
+            "Busca semântica",
+            True,
+            "inativa: modelo de embedding não configurado",
+            mandatory=False,
+        )
+
+    if not memory.VEC_AVAILABLE:
+        return CheckResult(
+            "Busca semântica",
+            True,
+            "inativa: sqlite-vec indisponível",
+            mandatory=False,
+        )
+
+    facts = memory.list_facts()
+    pending = [fact for fact in facts if not memory.fact_has_embedding(fact.id)]
+    if facts and pending:
+        return CheckResult(
+            "Busca semântica",
+            True,
+            f"inativa: {len(pending)} embeddings pendentes",
+            hint="Inicie o Ollama para o backfill automático.",
+            mandatory=False,
+        )
 
     return CheckResult(
-        "Banco SQLite",
-        ok,
-        detail,
-        "Verifique permissões de escrita no diretório do projeto." if not ok else "",
+        "Busca semântica",
+        True,
+        f"ativa (sqlite-vec + {model})",
+        mandatory=False,
     )
 
 
@@ -184,6 +257,7 @@ def run_checks() -> list[CheckResult]:
             _run_check("Ollama local", _check_ollama),
             _run_check("Modelo Piper", _check_piper_model),
             _run_check("Banco SQLite", _check_sqlite),
+            _run_check("Busca semântica", _check_semantic_search),
             _run_check("mcp.config.json", _check_mcp_config),
             _run_check(f"Porta {DEFAULT_PORT}", _check_port),
         ]
@@ -194,12 +268,12 @@ def run_checks() -> list[CheckResult]:
 def format_doctor_report(results: list[CheckResult]) -> str:
     lines: list[str] = []
     for result in results:
-        mark = "✓" if result.ok else "✗"
+        mark = status_mark(result)
         line = f"{mark} {result.name}: {result.detail}"
         if result.hint:
             line = f"{line} | {result.hint}"
         lines.append(line)
 
-    ok_count = sum(1 for result in results if result.ok)
-    lines.append(f"{ok_count}/{len(results)} checks OK")
+    ok_count, total = score_summary(results)
+    lines.append(f"{ok_count}/{total} checks OK")
     return "\n".join(lines)

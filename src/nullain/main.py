@@ -9,7 +9,7 @@ from rich.table import Table
 from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain.cli_helpers import confirm_action, handle_memory_command, refresh_system_message
-from nullain.doctor import run_checks
+from nullain.doctor import run_checks, score_summary, status_mark
 from nullain.persona import get_system_message
 from nullain.runtime import get_active_model
 from nullain import memory
@@ -114,15 +114,15 @@ def doctor() -> None:
 
     for result in results:
         table.add_row(
-            "✓" if result.ok else "✗",
+            status_mark(result),
             result.name,
             result.detail,
             result.hint,
         )
 
     console.print(table)
-    ok_count = sum(1 for result in results if result.ok)
-    console.print(f"{ok_count}/{len(results)} checks OK")
+    ok_count, total = score_summary(results)
+    console.print(f"{ok_count}/{total} checks OK")
 
 
 @app.command("serve")
