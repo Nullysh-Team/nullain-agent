@@ -9,7 +9,8 @@ from typing import Any
 from rich.console import Console
 
 from nullain import memory
-from nullain.llm import complete
+from nullain.history import trim_history
+from nullain.llm import complete, complete_stream
 from nullain.tools import (
     TOOL_REGISTRY,
     execute_tool,
@@ -148,6 +149,8 @@ def run_agent(
     tools = get_tool_schemas()
 
     for _ in range(MAX_ITERATIONS):
+        messages[:] = trim_history(messages, model=model)
+
         _emit(on_event, {"type": "thinking"})
 
         status_ctx = (
@@ -156,8 +159,25 @@ def run_agent(
             else nullcontext()
         )
 
+        streamed_to_console = False
+
+        def _on_chunk(chunk: str) -> None:
+            nonlocal streamed_to_console
+            _emit(on_event, {"type": "answer_chunk", "content": chunk})
+            if console is not None:
+                console.print(chunk, end="")
+                streamed_to_console = True
+
         with status_ctx:
-            response = complete(messages, model=model, tools=tools)
+            try:
+                response = complete_stream(
+                    messages,
+                    model=model,
+                    tools=tools,
+                    on_chunk=_on_chunk,
+                )
+            except Exception:
+                response = complete(messages, model=model, tools=tools)
 
         message = response.choices[0].message
         tool_calls = _resolve_tool_calls(message)
@@ -209,6 +229,9 @@ def run_agent(
         content = (message.content or "").strip()
         if not content:
             raise RuntimeError("O modelo retornou uma resposta vazia.")
+
+        if streamed_to_console:
+            console.print()
 
         messages.append({"role": "assistant", "content": content})
         _emit(on_event, {"type": "answer", "content": content})
