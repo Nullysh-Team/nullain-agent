@@ -1,8 +1,27 @@
+import builtins
 import io
+import sys
 
 from rich.console import Console
 
-from nullain import doctor, memory
+
+def _import_doctor_without_sounddevice():
+    real_import = builtins.__import__
+
+    def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "sounddevice":
+            raise OSError("PortAudio library not found")
+        return real_import(name, globals, locals, fromlist, level)
+
+    builtins.__import__ = guarded_import
+    sys.modules.pop("nullain.doctor", None)
+    from nullain import doctor, memory
+
+    builtins.__import__ = real_import
+    return doctor, memory
+
+
+doctor, memory = _import_doctor_without_sounddevice()
 
 
 def test_run_checks_handles_checker_exception(monkeypatch):

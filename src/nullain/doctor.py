@@ -106,7 +106,7 @@ def _check_ollama() -> CheckResult:
 
 
 def _check_piper_model() -> CheckResult:
-    from nullain.voice.tts import resolve_piper_model_path
+    from nullain.voice.paths import resolve_piper_model_path
 
     path = resolve_piper_model_path()
     return CheckResult("Modelo Piper", True, str(path), "")
