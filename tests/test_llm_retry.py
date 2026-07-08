@@ -1,14 +1,14 @@
-import pytest
 import litellm
+import pytest
 from litellm.exceptions import AuthenticationError, RateLimitError
 
-from nullain import llm
+from nullain import llm, memory
 
 
 @pytest.fixture(autouse=True)
-def _stub_runtime(monkeypatch):
-    monkeypatch.setattr(llm, "get_active_model", lambda: "test-model")
-    monkeypatch.setattr(llm, "get_active_temperature", lambda: 0.0)
+def _test_db(monkeypatch, tmp_path):
+    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
+    memory.init_db()
 
 
 class _FakeMessage:
@@ -76,15 +76,11 @@ def test_complete_does_not_retry_authentication_error(monkeypatch):
         ),
     )
 
-    try:
+    with pytest.raises(AuthenticationError):
         llm.complete(
             [{"role": "user", "content": "oi"}],
             model="test-model",
             temperature=0.0,
         )
-        raised = False
-    except AuthenticationError:
-        raised = True
 
-    assert raised
     assert calls["count"] == 1
