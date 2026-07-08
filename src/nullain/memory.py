@@ -1,9 +1,18 @@
+from __future__ import annotations
+
 import sqlite3
+import struct
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+import sqlite_vec
+
+from nullain.embeddings import EmbeddingUnavailable, embed_text
+
 DB_PATH = Path("nullain.db")
+_VEC_TABLE = "vec_facts"
+_EMBED_DIM_KEY = "embed_dim"
 
 
 @dataclass
@@ -18,10 +27,120 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _serialize_f32(vector: list[float]) -> bytes:
+    return struct.pack(f"{len(vector)}f", *vector)
+
+
+def _load_vec_extension(conn: sqlite3.Connection) -> None:
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    _load_vec_extension(conn)
     return conn
+
+
+def _get_embed_dim(conn: sqlite3.Connection | None = None) -> int | None:
+    if conn is None:
+        raw = get_setting(_EMBED_DIM_KEY)
+        return int(raw) if raw else None
+
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?",
+        (_EMBED_DIM_KEY,),
+    ).fetchone()
+    return int(row["value"]) if row else None
+
+
+def _set_embed_dim(conn: sqlite3.Connection, dim: int) -> None:
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (_EMBED_DIM_KEY, str(dim)),
+    )
+
+
+def _drop_vec_table(conn: sqlite3.Connection) -> None:
+    conn.execute(f"DROP TABLE IF EXISTS {_VEC_TABLE}")
+
+
+def _create_vec_table(conn: sqlite3.Connection, dim: int) -> None:
+    conn.execute(f"CREATE VIRTUAL TABLE {_VEC_TABLE} USING vec0(embedding float[{dim}])")
+    _set_embed_dim(conn, dim)
+
+
+def _facts_missing_embeddings(conn: sqlite3.Connection) -> list[Fact]:
+    rows = conn.execute(
+        f"""
+        SELECT f.id, f.key, f.value, f.created_at
+        FROM facts f
+        LEFT JOIN {_VEC_TABLE} v ON v.rowid = f.id
+        WHERE v.rowid IS NULL
+        ORDER BY f.id ASC
+        """
+    ).fetchall()
+    return [
+        Fact(
+            id=row["id"],
+            key=row["key"],
+            value=row["value"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+def _store_fact_embedding(conn: sqlite3.Connection, fact_id: int, vector: list[float]) -> None:
+    dim = len(vector)
+    stored_dim = _get_embed_dim(conn)
+
+    if stored_dim is None:
+        _create_vec_table(conn, dim)
+    elif stored_dim != dim:
+        _recreate_vec_table(conn, dim)
+        facts = conn.execute(
+            "SELECT id, key, value, created_at FROM facts ORDER BY id ASC"
+        ).fetchall()
+        for row in facts:
+            if row["id"] == fact_id:
+                continue
+            try:
+                other_vector = embed_text(row["value"])
+            except EmbeddingUnavailable:
+                continue
+            except Exception:
+                continue
+            if len(other_vector) == dim:
+                conn.execute(
+                    f"INSERT INTO {_VEC_TABLE}(rowid, embedding) VALUES (?, ?)",
+                    (row["id"], _serialize_f32(other_vector)),
+                )
+
+    conn.execute(
+        f"INSERT OR REPLACE INTO {_VEC_TABLE}(rowid, embedding) VALUES (?, ?)",
+        (fact_id, _serialize_f32(vector)),
+    )
+
+
+def _recreate_vec_table(conn: sqlite3.Connection, dim: int) -> None:
+    _drop_vec_table(conn)
+    _create_vec_table(conn, dim)
+
+
+def _has_vector_index() -> bool:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            (_VEC_TABLE,),
+        ).fetchone()
+        if row is None:
+            return False
+        count = conn.execute(f"SELECT COUNT(*) AS total FROM {_VEC_TABLE}").fetchone()
+        return bool(count and count["total"] > 0)
 
 
 def init_db() -> None:
@@ -59,6 +178,24 @@ def init_db() -> None:
             """
         )
 
+    backfill_pending_embeddings()
+
+
+def backfill_pending_embeddings() -> None:
+    try:
+        with _connect() as conn:
+            pending = _facts_missing_embeddings(conn)
+            for fact in pending:
+                try:
+                    vector = embed_text(fact.value)
+                except EmbeddingUnavailable:
+                    return
+                except Exception:
+                    continue
+                _store_fact_embedding(conn, fact.id, vector)
+    except Exception:
+        return
+
 
 def add_message(session_id: str, role: str, content: str) -> None:
     with _connect() as conn:
@@ -78,6 +215,15 @@ def add_fact(value: str) -> Fact:
             (key, value, created_at),
         )
         fact_id = int(cursor.lastrowid)
+
+        try:
+            vector = embed_text(value)
+        except EmbeddingUnavailable:
+            vector = None
+        except Exception:
+            vector = None
+        else:
+            _store_fact_embedding(conn, fact_id, vector)
 
     return Fact(id=fact_id, key=key, value=value, created_at=created_at)
 
@@ -99,8 +245,46 @@ def list_facts() -> list[Fact]:
     ]
 
 
+def search_facts(query: str, top_k: int = 5) -> list[Fact]:
+    if not query.strip() or not _has_vector_index():
+        return []
+
+    try:
+        vector = embed_text(query)
+    except EmbeddingUnavailable:
+        return []
+
+    stored_dim = _get_embed_dim()
+    if stored_dim is None or stored_dim != len(vector):
+        return []
+
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT f.id, f.key, f.value, f.created_at
+            FROM {_VEC_TABLE} v
+            JOIN facts f ON f.id = v.rowid
+            WHERE v.embedding MATCH ?
+            AND k = ?
+            ORDER BY distance
+            """,
+            (_serialize_f32(vector), top_k),
+        ).fetchall()
+
+    return [
+        Fact(
+            id=row["id"],
+            key=row["key"],
+            value=row["value"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
 def delete_fact(fact_id: int) -> bool:
     with _connect() as conn:
+        conn.execute(f"DELETE FROM {_VEC_TABLE} WHERE rowid = ?", (fact_id,))
         cursor = conn.execute("DELETE FROM facts WHERE id = ?", (fact_id,))
         return cursor.rowcount > 0
 
@@ -193,10 +377,38 @@ def get_tool_logs(limit: int = 50) -> list[dict]:
     ]
 
 
-def format_facts_for_prompt() -> str:
-    facts = list_facts()
+def format_facts_for_prompt(query: str | None = None) -> str:
+    facts: list[Fact]
+
+    if query and query.strip() and _has_vector_index():
+        try:
+            facts = search_facts(query, top_k=5)
+        except EmbeddingUnavailable:
+            facts = list_facts()
+        except Exception:
+            facts = list_facts()
+        if not facts:
+            facts = list_facts()
+    else:
+        facts = list_facts()
+
     if not facts:
         return ""
 
     lines = [f"- {fact.value}" for fact in facts]
     return "Fatos conhecidos sobre Netty:\n" + "\n".join(lines)
+
+
+def fact_has_embedding(fact_id: int) -> bool:
+    with _connect() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+            (_VEC_TABLE,),
+        ).fetchone()
+        if table is None:
+            return False
+        row = conn.execute(
+            f"SELECT rowid FROM {_VEC_TABLE} WHERE rowid = ?",
+            (fact_id,),
+        ).fetchone()
+    return row is not None

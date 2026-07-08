@@ -14,6 +14,7 @@ from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain import env_tokens, memory
 from nullain.mcp_config_store import add_server, delete_server, list_servers
+from nullain.cli_helpers import refresh_system_message
 from nullain.persona import get_base_prompt, get_system_message
 from nullain.runtime import get_active_model
 from nullain.tools import TOOL_REGISTRY
@@ -301,6 +302,7 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
             messages.append({"role": "user", "content": content})
             memory.add_message(session_id, "user", content)
+            refresh_system_message(messages)
 
             def on_event(event: dict[str, Any]) -> None:
                 send_event(event)

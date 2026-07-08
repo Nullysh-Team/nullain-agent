@@ -20,6 +20,7 @@ dependencies = [
     "rich>=15.0.0",
     "sounddevice>=0.5.0",
     "soundfile>=0.13.0",
+    "sqlite-vec>=0.1.6",
     "typer>=0.26.8",
     "uvicorn[standard]>=0.50.0",
 ]

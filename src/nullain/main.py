@@ -8,7 +8,7 @@ from rich.table import Table
 
 from nullain.agent import run_agent
 from nullain.brain import Brain
-from nullain.cli_helpers import confirm_action, handle_memory_command
+from nullain.cli_helpers import confirm_action, handle_memory_command, refresh_system_message
 from nullain.doctor import run_checks
 from nullain.persona import get_system_message
 from nullain.runtime import get_active_model
@@ -162,6 +162,7 @@ def _chat_loop(session_id: str, messages: list[dict[str, str]]) -> None:
 
         messages.append({"role": "user", "content": user_input})
         memory.add_message(session_id, "user", user_input)
+        refresh_system_message(messages)
 
         try:
             response = run_agent(

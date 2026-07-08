@@ -24,11 +24,23 @@ def confirm_action(console: Console, preview: str) -> bool:
     return answer in ("s", "sim", "y", "yes")
 
 
+def _last_user_query(messages: list[dict[str, str]]) -> str | None:
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = (message.get("content") or "").strip()
+        if content:
+            return content
+    return None
+
+
 def refresh_system_message(messages: list[dict[str, str]]) -> None:
+    query = _last_user_query(messages)
+    system_message = get_system_message(query=query)
     if messages and messages[0]["role"] == "system":
-        messages[0] = get_system_message()
+        messages[0] = system_message
     else:
-        messages.insert(0, get_system_message())
+        messages.insert(0, system_message)
 
 
 def print_facts(console: Console) -> None:

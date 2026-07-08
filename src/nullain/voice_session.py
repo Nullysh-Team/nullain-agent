@@ -8,7 +8,7 @@ from rich.panel import Panel
 from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain import memory
-from nullain.cli_helpers import confirm_action, handle_memory_command
+from nullain.cli_helpers import confirm_action, handle_memory_command, refresh_system_message
 from nullain.persona import get_system_message
 from nullain.runtime import get_active_model
 from nullain.voice.audio import play_wav_bytes, record_seconds
@@ -93,6 +93,7 @@ def _voice_loop(
 
         messages.append({"role": "user", "content": user_text})
         memory.add_message(session_id, "user", user_text)
+        refresh_system_message(messages)
 
         try:
             response = run_agent(

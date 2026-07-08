@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     )
 
     nullain_model: str = "ollama/llama3.2"
+    nullain_embed_model: str = "ollama/nomic-embed-text"
     nullain_whisper_model: str = "base"
     nullain_whisper_device: str = "cpu"
     nullain_whisper_compute_type: str = "int8"

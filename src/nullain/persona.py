@@ -22,11 +22,11 @@ def get_base_prompt() -> str:
     return SYSTEM_PROMPT
 
 
-def get_system_message() -> dict[str, str]:
+def get_system_message(query: str | None = None) -> dict[str, str]:
     from nullain.memory import format_facts_for_prompt
 
     content = get_base_prompt()
-    facts_block = format_facts_for_prompt()
+    facts_block = format_facts_for_prompt(query=query)
     if facts_block:
         content = f"{content}\n\n{facts_block}"
 
