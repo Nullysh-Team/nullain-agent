@@ -41,8 +41,11 @@ def get_system_message(query: str | None = None) -> dict[str, str]:
     except Exception:
         pass
     content += (
-        "\n\nVocê pode usar list_squad_roles e run_squad para objetivos multi-etapa "
-        "com sub-agentes especializados."
+        "\n\nCapacidades avançadas: "
+        "list_squad_roles/run_squad (multi-agente); "
+        "run_engineering_loop (plan→act→evaluate→replan); "
+        "run_coding_task (harness NULLAIN-CODING). "
+        "Use-as para objetivos complexos em vez de improvisar ciclos longos."
     )
     return {"role": "system", "content": content}
 

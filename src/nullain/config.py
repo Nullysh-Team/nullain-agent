@@ -36,6 +36,20 @@ class Settings(BaseSettings):
     nullain_squad_max_roles: int = 3
     nullain_squad_max_iterations: int = 5
     nullain_squad_max_wall_seconds: float = 300.0
+    # Loop Engineering
+    nullain_loop_max_cycles: int = 5
+    nullain_loop_max_iterations: int = 6
+    nullain_loop_max_wall_seconds: float = 600.0
+    nullain_loop_require_checkpoint: bool = False
+    # NULLAIN-CODING
+    nullain_coding_max_iterations: int = 12
+    nullain_coding_max_wall_seconds: float = 600.0
+    # Shell sandbox
+    nullain_shell_sandbox: bool = True
+    # Allowlist CSV (prefixos ou re:regex). Vazio = só deny-list.
+    nullain_shell_allowlist: str = ""
+    # Deny extras separados por ||
+    nullain_shell_deny_extra: str = ""
 
 
 @lru_cache

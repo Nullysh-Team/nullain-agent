@@ -181,7 +181,12 @@ class ToolRegistry:
                 blocked = self._enforce_extra_confirmation(name, arguments, confirm)
                 if blocked is not None:
                     return blocked
-            if native_needs_confirmation or entry.get("source") in {"skill", "squad"}:
+            if native_needs_confirmation or entry.get("source") in {
+                "skill",
+                "squad",
+                "loop",
+                "coding",
+            }:
                 try:
                     return fn(**arguments, confirm=confirm)
                 except TypeError:
@@ -194,7 +199,7 @@ class ToolRegistry:
 
 
 def init_tools(mcp_manager=None) -> int:
-    """Monta TOOL_REGISTRY: nativas + skills + squads + MCP."""
+    """Monta TOOL_REGISTRY: nativas + skills + squads + loop + coding + MCP."""
     global _mcp_manager, TOOL_REGISTRY
 
     _mcp_manager = mcp_manager
@@ -212,6 +217,20 @@ def init_tools(mcp_manager=None) -> int:
         from nullain.squads.orchestrator import build_squad_tools
 
         TOOL_REGISTRY.update(build_squad_tools())
+    except Exception:
+        pass
+
+    try:
+        from nullain.loop.engine import build_loop_tools
+
+        TOOL_REGISTRY.update(build_loop_tools())
+    except Exception:
+        pass
+
+    try:
+        from nullain.coding.harness import build_coding_tools
+
+        TOOL_REGISTRY.update(build_coding_tools())
     except Exception:
         pass
 

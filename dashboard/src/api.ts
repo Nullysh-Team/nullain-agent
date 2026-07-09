@@ -225,6 +225,19 @@ export const api = {
         use_llm_planner: opts?.use_llm_planner ?? true,
       }),
     }),
+  runLoop: (goal: string, opts?: { max_cycles?: number }) =>
+    request<Record<string, unknown>>("/loop/run", {
+      method: "POST",
+      body: JSON.stringify({
+        goal,
+        max_cycles: opts?.max_cycles,
+      }),
+    }),
+  runCoding: (goal: string, context = "") =>
+    request<Record<string, unknown>>("/coding/run", {
+      method: "POST",
+      body: JSON.stringify({ goal, context }),
+    }),
   getLogs: (limit = 50) => request<ToolLog[]>(`/logs?limit=${limit}`),
   getMetrics: (limit = 50) =>
     request<MetricsResponse>(`/metrics?limit=${limit}`),

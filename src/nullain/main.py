@@ -51,7 +51,7 @@ def chat(
         f"Modelo ativo: [bold]{get_active_model()}[/bold]",
         f"Tools: {total_tools} ({mcp_tool_count} MCP) · Skills: {core.skill_count}",
         "Comandos: /lembra /fatos /esquece /sair",
-        "Skills: list_skills / run_skill · Squads: run_squad",
+        "Skills · Squads · Loop · Coding (tools run_*)",
         "Use --voice para modo voz local.",
         "Digite /sair para encerrar.",
     ]
@@ -224,6 +224,131 @@ def squad_cmd(
         Panel(
             Markdown(result.summary),
             title=f"Squad · {result.duration_ms:.0f}ms",
+            border_style="white",
+        )
+    )
+
+
+@app.command("loop")
+def loop_cmd(
+    goal: str = typer.Argument(..., help="Objetivo do Loop Engineering."),
+    max_cycles: int = typer.Option(5, "--max-cycles", help="Máximo de ciclos."),
+    checkpoint: bool = typer.Option(
+        False,
+        "--checkpoint",
+        help="Pede confirmação humana entre ciclos.",
+    ),
+) -> None:
+    """Loop Engineering: plan → act → evaluate → replan."""
+    from nullain.config import get_settings
+    from nullain.loop import EngineeringLoop, LoopBudget
+
+    core = Brain()
+    core.startup()
+    settings = get_settings()
+
+    console.print(
+        Panel(
+            f"Objetivo: [bold]{goal}[/bold]\n"
+            f"Máx. ciclos: {max_cycles} · checkpoint={'sim' if checkpoint else 'não'}",
+            title="NULLAIN Loop Engineering",
+            border_style="white",
+        )
+    )
+
+    budget = LoopBudget(
+        max_cycles=max_cycles,
+        max_iterations_per_cycle=settings.nullain_loop_max_iterations,
+        max_wall_seconds=settings.nullain_loop_max_wall_seconds,
+        require_checkpoint=checkpoint or settings.nullain_loop_require_checkpoint,
+    )
+    engine = EngineeringLoop(budget=budget)
+
+    def on_event(event: dict) -> None:
+        etype = event.get("type")
+        if etype == "loop_cycle_start":
+            console.print(f"[bold]▶ Ciclo {event.get('cycle')}[/bold]")
+        elif etype == "loop_plan":
+            console.print(f"[dim]Plano:\n{event.get('plan', '')[:500]}[/dim]")
+        elif etype == "loop_cycle_end":
+            mark = "✓" if event.get("done") else "…"
+            console.print(
+                f"[dim]{mark} ciclo {event.get('cycle')} "
+                f"score={event.get('score')} "
+                f"({event.get('duration_ms', 0):.0f}ms)[/dim]"
+            )
+
+    try:
+        result = engine.run(
+            goal,
+            confirm=lambda preview: confirm_action(console, preview),
+            on_event=on_event,
+        )
+    finally:
+        core.shutdown()
+
+    console.print(
+        Panel(
+            Markdown(result.final_output or result.stop_reason),
+            title=(
+                f"Loop · converged={result.converged} · "
+                f"{result.stop_reason} · {result.duration_ms:.0f}ms"
+            ),
+            border_style="white",
+        )
+    )
+
+
+@app.command("code")
+def code_cmd(
+    goal: str = typer.Argument(..., help="Tarefa de engenharia de software."),
+    context: str = typer.Option("", "--context", help="Contexto adicional."),
+) -> None:
+    """NULLAIN-CODING — harness de engenharia de alto desempenho."""
+    from nullain.coding import CodingBudget, CodingHarness
+    from nullain.config import get_settings
+
+    core = Brain()
+    core.startup()
+    settings = get_settings()
+
+    console.print(
+        Panel(
+            f"Tarefa: [bold]{goal}[/bold]",
+            title="NULLAIN-CODING",
+            border_style="white",
+        )
+    )
+
+    harness = CodingHarness(
+        budget=CodingBudget(
+            max_iterations=settings.nullain_coding_max_iterations,
+            max_wall_seconds=settings.nullain_coding_max_wall_seconds,
+        ),
+        tool_names=[
+            "list_files",
+            "read_file",
+            "write_file",
+            "run_command",
+            "list_skills",
+            "run_skill",
+        ],
+    )
+
+    try:
+        result = harness.run(
+            goal,
+            confirm=lambda preview: confirm_action(console, preview),
+            context=context,
+        )
+    finally:
+        core.shutdown()
+
+    body = result.output if result.ok else f"Erro: {result.error}"
+    console.print(
+        Panel(
+            Markdown(body),
+            title=f"Coding · ok={result.ok} · {result.duration_ms:.0f}ms",
             border_style="white",
         )
     )

@@ -361,6 +361,63 @@ def post_squad_run(payload: SquadRunRequest) -> dict[str, Any]:
     return result.to_dict()
 
 
+class LoopRunRequest(BaseModel):
+    goal: str
+    max_cycles: int | None = None
+    require_checkpoint: bool = False
+
+
+@app.post("/loop/run", dependencies=[Depends(require_api_token)])
+def post_loop_run(payload: LoopRunRequest) -> dict[str, Any]:
+    from nullain.config import get_settings
+    from nullain.loop import EngineeringLoop, LoopBudget
+
+    settings = get_settings()
+    budget = LoopBudget(
+        max_cycles=payload.max_cycles or settings.nullain_loop_max_cycles,
+        max_iterations_per_cycle=settings.nullain_loop_max_iterations,
+        max_wall_seconds=settings.nullain_loop_max_wall_seconds,
+        require_checkpoint=payload.require_checkpoint
+        or settings.nullain_loop_require_checkpoint,
+    )
+    engine = EngineeringLoop(budget=budget)
+    result = engine.run(payload.goal.strip(), confirm=lambda _p: True)
+    return result.to_dict()
+
+
+class CodingRunRequest(BaseModel):
+    goal: str
+    context: str = ""
+
+
+@app.post("/coding/run", dependencies=[Depends(require_api_token)])
+def post_coding_run(payload: CodingRunRequest) -> dict[str, Any]:
+    from nullain.coding import CodingBudget, CodingHarness
+    from nullain.config import get_settings
+
+    settings = get_settings()
+    harness = CodingHarness(
+        budget=CodingBudget(
+            max_iterations=settings.nullain_coding_max_iterations,
+            max_wall_seconds=settings.nullain_coding_max_wall_seconds,
+        ),
+        tool_names=[
+            "list_files",
+            "read_file",
+            "write_file",
+            "run_command",
+            "list_skills",
+            "run_skill",
+        ],
+    )
+    result = harness.run(
+        payload.goal.strip(),
+        confirm=lambda _p: True,
+        context=payload.context,
+    )
+    return result.to_dict()
+
+
 @app.get("/logs", dependencies=[Depends(require_api_token)])
 def get_logs(limit: int = 50) -> list[dict[str, Any]]:
     return memory.get_tool_logs(limit=limit)

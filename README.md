@@ -173,8 +173,22 @@ uv run nullain skills --reload
 uv run nullain squad "pesquise o projeto e proponha um fix no README"
 ```
 
-No chat: tools `list_skills`, `run_skill`, `list_squad_roles`, `run_squad`.  
-Dashboard: página **Skills** e **Reload MCP** em Integrações.
+### Loop Engineering & Coding
+
+```bash
+# Auto-iteração controlada: plan → act → evaluate → replan
+uv run nullain loop "adicione um teste e garanta que passa" --max-cycles 4
+
+# Harness de engenharia (inspecionar → editar → verificar)
+uv run nullain code "corrija o parse de JSON inválido em tools"
+
+# Shell sandbox (deny-list ativa por padrão)
+# NULLAIN_SHELL_SANDBOX=true
+# NULLAIN_SHELL_ALLOWLIST=python,pytest,uv,git
+```
+
+No chat: `list_skills`, `run_skill`, `run_squad`, `run_engineering_loop`, `run_coding_task`.  
+Dashboard: **Skills** (squad/loop/coding) e **Reload MCP**.
 
 ## ◻ Roadmap
 
@@ -185,8 +199,9 @@ Dashboard: página **Skills** e **Reload MCP** em Integrações.
 - [x] Voz local offline
 - [x] NULLAIN-SQUADS — orquestração multi-agente (v0)
 - [x] NULLAIN-SKILLS — registro extensível de capacidades (v0)
-- [ ] Loop Engineering — auto-iteração controlada
-- [ ] NULLAIN-CODING — harness de engenharia
+- [x] Loop Engineering — auto-iteração controlada
+- [x] NULLAIN-CODING — harness de engenharia
+- [x] Shell sandbox (deny-list + allowlist opcional)
 
 ---
 

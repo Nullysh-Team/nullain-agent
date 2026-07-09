@@ -24,6 +24,10 @@ export function SkillsPage() {
   const [status, setStatus] = useState("");
   const [squadGoal, setSquadGoal] = useState("");
   const [squadResult, setSquadResult] = useState<string>("");
+  const [loopGoal, setLoopGoal] = useState("");
+  const [loopResult, setLoopResult] = useState("");
+  const [codingGoal, setCodingGoal] = useState("");
+  const [codingResult, setCodingResult] = useState("");
   const [running, setRunning] = useState(false);
 
   async function load() {
@@ -62,6 +66,42 @@ export function SkillsPage() {
       setStatus("Squad concluído.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Erro ao rodar squad.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function handleRunLoop() {
+    if (!loopGoal.trim()) {
+      setStatus("Informe o objetivo do loop.");
+      return;
+    }
+    setRunning(true);
+    setLoopResult("");
+    try {
+      const result = await api.runLoop(loopGoal.trim(), { max_cycles: 3 });
+      setLoopResult(JSON.stringify(result, null, 2));
+      setStatus("Loop Engineering concluído.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Erro no loop.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function handleRunCoding() {
+    if (!codingGoal.trim()) {
+      setStatus("Informe a tarefa de coding.");
+      return;
+    }
+    setRunning(true);
+    setCodingResult("");
+    try {
+      const result = await api.runCoding(codingGoal.trim());
+      setCodingResult(JSON.stringify(result, null, 2));
+      setStatus("NULLAIN-CODING concluído.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Erro no coding.");
     } finally {
       setRunning(false);
     }
@@ -147,6 +187,58 @@ export function SkillsPage() {
         {squadResult ? (
           <pre className="mt-4 max-h-80 overflow-auto border border-[#222] p-3 font-mono text-xs text-[#999]">
             {squadResult}
+          </pre>
+        ) : null}
+      </Panel>
+
+      <Panel title="Loop Engineering">
+        <p className="mb-3 text-xs text-[#666]">
+          plan → act → evaluate → replan até convergir ou esgotar o budget.
+        </p>
+        <textarea
+          value={loopGoal}
+          onChange={(event) => setLoopGoal(event.target.value)}
+          rows={2}
+          placeholder="Ex.: adicione um teste e garanta que passa"
+          className="w-full border border-[#444] bg-black px-3 py-2 font-mono text-sm outline-none focus:border-white"
+        />
+        <button
+          type="button"
+          disabled={running}
+          onClick={handleRunLoop}
+          className="mt-3 border border-white px-4 py-2 text-xs tracking-wide uppercase transition hover:bg-white hover:text-black disabled:border-[#444] disabled:text-[#666]"
+        >
+          {running ? "Executando..." : "Executar loop"}
+        </button>
+        {loopResult ? (
+          <pre className="mt-4 max-h-64 overflow-auto border border-[#222] p-3 font-mono text-xs text-[#999]">
+            {loopResult}
+          </pre>
+        ) : null}
+      </Panel>
+
+      <Panel title="NULLAIN-CODING">
+        <p className="mb-3 text-xs text-[#666]">
+          Harness de engenharia: inspecionar → editar → verificar.
+        </p>
+        <textarea
+          value={codingGoal}
+          onChange={(event) => setCodingGoal(event.target.value)}
+          rows={2}
+          placeholder="Ex.: corrija o bug no parse de argumentos"
+          className="w-full border border-[#444] bg-black px-3 py-2 font-mono text-sm outline-none focus:border-white"
+        />
+        <button
+          type="button"
+          disabled={running}
+          onClick={handleRunCoding}
+          className="mt-3 border border-white px-4 py-2 text-xs tracking-wide uppercase transition hover:bg-white hover:text-black disabled:border-[#444] disabled:text-[#666]"
+        >
+          {running ? "Executando..." : "Executar coding"}
+        </button>
+        {codingResult ? (
+          <pre className="mt-4 max-h-64 overflow-auto border border-[#222] p-3 font-mono text-xs text-[#999]">
+            {codingResult}
           </pre>
         ) : null}
       </Panel>
