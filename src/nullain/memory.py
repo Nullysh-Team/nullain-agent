@@ -346,6 +346,23 @@ def enqueue_background(fn, *args) -> None:
             pass
 
 
+def flush_background_writer(timeout: float = 5.0) -> None:
+    """Bloqueia até esvaziar a fila (tarefas enfileiradas antes do marker)."""
+    if _BG_QUEUE is None:
+        return
+
+    done = threading.Event()
+
+    def _mark_done() -> None:
+        done.set()
+
+    _BG_QUEUE.put((_mark_done, ()))
+    if not done.wait(timeout=timeout):
+        raise TimeoutError(
+            f"flush_background_writer: fila não esvaziou em {timeout}s"
+        )
+
+
 @dataclass
 class TurnMetrics:
     session_id: str | None = None

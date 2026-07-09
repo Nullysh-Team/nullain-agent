@@ -422,8 +422,7 @@ def test_list_sessions_returns_grouped_messages(mem_db):
     memory.add_message("session-a", "assistant", "oi")
     memory.add_message("session-b", "user", "tchau")
 
-    # Flush background queue
-    time.sleep(0.1)
+    memory.flush_background_writer()
 
     sessions = memory.list_sessions()
     session_ids = {s["session_id"] for s in sessions}
@@ -436,8 +435,7 @@ def test_get_session_messages_returns_ordered(mem_db):
     memory.add_message("s1", "user", "primeira")
     memory.add_message("s1", "assistant", "segunda")
 
-    # Flush
-    time.sleep(0.1)
+    memory.flush_background_writer()
 
     msgs = memory.get_session_messages("s1")
     assert len(msgs) >= 2
