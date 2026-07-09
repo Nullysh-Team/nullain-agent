@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     # Token local da API. Vazio = auth desligada (dev). Com valor, REST/WS exigem Bearer.
     nullain_api_token: str = ""
     nullain_confirm_timeout_seconds: float = 120.0
+    # Workspace fixo para jail de arquivos e cwd do shell. Vazio = cwd no startup.
+    nullain_workspace: str = ""
+    # Máximo de caracteres de tool_result reinjetados no contexto do LLM.
+    nullain_tool_result_max_chars: int = 8000
+    # Retenção de logs e métricas (0 = desliga aquele critério).
+    nullain_log_retention_days: int = 30
+    nullain_log_max_rows: int = 5000
+    nullain_metrics_retention_days: int = 30
+    nullain_metrics_max_rows: int = 5000
 
 
 @lru_cache

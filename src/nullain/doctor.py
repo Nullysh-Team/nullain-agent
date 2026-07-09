@@ -263,6 +263,17 @@ def _check_latency_metrics() -> CheckResult:
     return CheckResult("Métricas de latência", True, detail, mandatory=False)
 
 
+def _check_workspace() -> CheckResult:
+    from nullain.workspace import resolve_workspace_root
+
+    root = resolve_workspace_root()
+    # Não muta o processo do doctor; só reporta o path efetivo.
+    exists = root.exists() and root.is_dir()
+    detail = str(root)
+    hint = "" if exists else "Crie o diretório ou ajuste NULLAIN_WORKSPACE."
+    return CheckResult("Workspace", exists, detail, hint)
+
+
 def run_checks() -> list[CheckResult]:
     checks: list[CheckResult] = [
         _run_check("Python >= 3.13", _check_python),
@@ -279,6 +290,7 @@ def run_checks() -> list[CheckResult]:
             _run_check("Modelo Piper", _check_piper_model),
             _run_check("Banco SQLite", _check_sqlite),
             _run_check("Busca semântica", _check_semantic_search),
+            _run_check("Workspace", _check_workspace),
             _run_check("mcp.config.json", _check_mcp_config),
             _run_check(f"Porta {DEFAULT_PORT}", _check_port),
             _run_check("Métricas de latência", _check_latency_metrics),

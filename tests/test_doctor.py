@@ -78,6 +78,16 @@ def test_optional_tokens_are_informational_and_excluded_from_score(monkeypatch, 
     )
     monkeypatch.setattr(doctor, "_check_mcp_config", lambda: doctor.CheckResult("mcp.config.json", True, "ok"))
     monkeypatch.setattr(doctor, "_check_port", lambda: doctor.CheckResult("Porta 8420", True, "livre"))
+    monkeypatch.setattr(
+        doctor,
+        "_check_workspace",
+        lambda: doctor.CheckResult("Workspace", True, str(tmp_path)),
+    )
+    monkeypatch.setattr(
+        doctor,
+        "_check_latency_metrics",
+        lambda: doctor.CheckResult("Métricas de latência", True, "sem dados", mandatory=False),
+    )
 
     results = doctor.run_checks()
 
@@ -91,8 +101,9 @@ def test_optional_tokens_are_informational_and_excluded_from_score(monkeypatch, 
     assert groq.detail == "presente"
 
     ok_count, total = doctor.score_summary(results)
-    assert total == 8
-    assert ok_count == 8
+    # Python, .env, modelo, ollama, piper, sqlite, workspace, mcp, porta
+    assert total == 9
+    assert ok_count == 9
     assert "Token OPENAI_API_KEY" not in {r.name for r in results if r.mandatory}
 
 

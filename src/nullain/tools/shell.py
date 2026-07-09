@@ -1,10 +1,17 @@
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
+
+from nullain.tools import files
 
 ConfirmFn = Callable[[str], bool]
 
 MAX_OUTPUT_CHARS = 5000
 TIMEOUT_SECONDS = 60
+
+
+def _workspace_cwd() -> Path:
+    return Path(files.WORKSPACE_ROOT).resolve()
 
 
 def run_command(cmd: str, confirm: ConfirmFn | None = None) -> str:
@@ -13,7 +20,8 @@ def run_command(cmd: str, confirm: ConfirmFn | None = None) -> str:
             "Erro: esta operação exige confirmação, mas nenhum confirmador foi fornecido."
         )
 
-    preview = f"Comando a executar:\n\n{cmd}"
+    cwd = _workspace_cwd()
+    preview = f"Comando a executar (cwd={cwd}):\n\n{cmd}"
 
     if not confirm(preview):
         return "Operação cancelada pelo usuário."
@@ -27,6 +35,7 @@ def run_command(cmd: str, confirm: ConfirmFn | None = None) -> str:
             timeout=TIMEOUT_SECONDS,
             encoding="utf-8",
             errors="replace",
+            cwd=str(cwd),
         )
     except subprocess.TimeoutExpired:
         return f"Erro: comando excedeu o timeout de {TIMEOUT_SECONDS}s."

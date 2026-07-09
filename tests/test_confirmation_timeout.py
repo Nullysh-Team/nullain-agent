@@ -1,5 +1,7 @@
 """Broker de confirmação expõe timeout_seconds no evento."""
 
+import threading
+
 from nullain.server import ConfirmationBroker
 
 
@@ -9,9 +11,12 @@ def test_confirmation_request_includes_timeout_seconds():
 
     def send_event(event: dict) -> None:
         events.append(event)
-        # Responde imediatamente para não bloquear o teste
+        # Responde em thread auxiliar: request() segura o gate até o wait terminar.
         request_id = event["request_id"]
-        broker.respond(request_id, True)
+        threading.Thread(
+            target=lambda: broker.respond(request_id, True),
+            daemon=True,
+        ).start()
 
     approved = broker.request("preview", send_event)
 

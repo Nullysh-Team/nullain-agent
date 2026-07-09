@@ -1,6 +1,7 @@
 from nullain import memory
 from nullain.mcp_client import McpManager
 from nullain.tools import init_tools, shutdown_tools
+from nullain.workspace import set_workspace_root
 
 
 class Brain:
@@ -9,6 +10,7 @@ class Brain:
         self.started = False
 
     def startup(self) -> tuple[int, int]:
+        set_workspace_root()
         memory.init_db()
         mcp_count = self.mcp_manager.connect()
         total = init_tools(self.mcp_manager)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable
@@ -21,6 +22,7 @@ ConfirmFn = Callable[[str], bool]
 EventFn = Callable[[dict[str, Any]], None]
 
 CONFIRM_TIMEOUT_SECONDS = 120.0
+DEFAULT_TOOL_RESULT_MAX_CHARS = 8000
 
 
 @dataclass
@@ -52,6 +54,34 @@ def _confirm_timeout() -> float:
     return float(CONFIRM_TIMEOUT_SECONDS)
 
 
+def _tool_result_max_chars() -> int:
+    try:
+        from nullain.config import get_settings
+
+        value = get_settings().nullain_tool_result_max_chars
+        if value and value > 0:
+            return int(value)
+    except Exception:
+        pass
+    return DEFAULT_TOOL_RESULT_MAX_CHARS
+
+
+def compact_tool_result(result: str, max_chars: int | None = None) -> str:
+    """Reduz tool_result antes de reinjetar no contexto do LLM."""
+    limit = max_chars if max_chars is not None else _tool_result_max_chars()
+    if limit <= 0 or len(result) <= limit:
+        return result
+
+    marker = f"\n\n... ({len(result) - limit} chars omitidos; resultado truncado) ...\n\n"
+    budget = limit - len(marker)
+    if budget < 64:
+        return result[:limit] + "\n... (truncado)"
+
+    head = budget * 2 // 3
+    tail = budget - head
+    return result[:head] + marker + result[-tail:]
+
+
 def _confirm_with_timeout(confirm: ConfirmFn, preview: str) -> bool:
     """Executa confirmação com timeout — evita travar o turno indefinidamente."""
     import concurrent.futures
@@ -62,6 +92,17 @@ def _confirm_with_timeout(confirm: ConfirmFn, preview: str) -> bool:
             return future.result(timeout=_confirm_timeout())
         except concurrent.futures.TimeoutError:
             return False
+
+
+def _serialize_confirm(confirm: ConfirmFn) -> ConfirmFn:
+    """Garante uma confirmação por vez (tools paralelas não abrem N modais)."""
+    lock = threading.Lock()
+
+    def _wrapped(preview: str) -> bool:
+        with lock:
+            return _confirm_with_timeout(confirm, preview)
+
+    return _wrapped
 
 
 class Agent:
@@ -79,13 +120,14 @@ class Agent:
         console: Console | None = None,
         session_id: str | None = None,
         parallel_tools: bool = True,
+        tool_result_max_chars: int | None = None,
     ) -> None:
         self.registry = ToolRegistry(
             dict(registry._tools),
             mcp_manager=registry._mcp_manager,
             confirm_all=confirm_all or registry.confirm_all,
         )
-        self.confirm = confirm
+        self.confirm = _serialize_confirm(confirm)
         self.model = model
         self.temperature = temperature
         self.max_iterations = max_iterations
@@ -94,6 +136,7 @@ class Agent:
         self.console = console
         self.session_id = session_id
         self.parallel_tools = parallel_tools
+        self.tool_result_max_chars = tool_result_max_chars
 
     def _tool_call_from_native(self, tool_call: Any) -> ToolCall:
         return ToolCall(
@@ -228,6 +271,7 @@ class Agent:
         tool_duration = (time.monotonic() - tool_start) * 1000
         stats.tool_durations.append(tool_duration)
 
+        # Log completo; contexto do LLM recebe versão compactada.
         memory.log_tool_call(
             tool_call.name,
             arguments,
@@ -235,16 +279,18 @@ class Agent:
             session_id=self.session_id,
         )
 
+        compacted = compact_tool_result(result, max_chars=self.tool_result_max_chars)
+
         self._emit(
             {
                 "type": "tool_result",
                 "name": tool_call.name,
-                "result": result,
+                "result": compacted,
                 "duration_ms": round(tool_duration, 1),
             }
         )
 
-        return tool_call.id, result
+        return tool_call.id, compacted
 
     def _execute_tools(
         self,

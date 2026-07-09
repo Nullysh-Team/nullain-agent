@@ -6,6 +6,7 @@ ConfirmFn = Callable[[str], bool]
 MAX_READ_CHARS = 10_000
 PREVIEW_CHARS = 500
 
+# Espelhado por nullain.workspace.set_workspace_root(); testes monkeypatcham aqui.
 WORKSPACE_ROOT = Path.cwd().resolve()
 
 

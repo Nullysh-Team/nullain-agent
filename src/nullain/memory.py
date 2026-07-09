@@ -5,7 +5,7 @@ import queue
 import struct
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -273,6 +273,10 @@ def init_db() -> None:
         )
 
     start_background_writer()
+    try:
+        purge_retention()
+    except Exception:
+        pass
     backfill_pending_embeddings_background()
 
 
@@ -647,6 +651,75 @@ def _log_tool_call_sync(
                 _now_iso(),
             ),
         )
+
+
+def purge_retention(
+    *,
+    log_retention_days: int | None = None,
+    log_max_rows: int | None = None,
+    metrics_retention_days: int | None = None,
+    metrics_max_rows: int | None = None,
+) -> dict[str, int]:
+    """Remove tool_logs e metrics antigos/excedentes. Retorna contagens deletadas."""
+    try:
+        from nullain.config import get_settings
+
+        settings = get_settings()
+        if log_retention_days is None:
+            log_retention_days = int(settings.nullain_log_retention_days)
+        if log_max_rows is None:
+            log_max_rows = int(settings.nullain_log_max_rows)
+        if metrics_retention_days is None:
+            metrics_retention_days = int(settings.nullain_metrics_retention_days)
+        if metrics_max_rows is None:
+            metrics_max_rows = int(settings.nullain_metrics_max_rows)
+    except Exception:
+        log_retention_days = log_retention_days if log_retention_days is not None else 30
+        log_max_rows = log_max_rows if log_max_rows is not None else 5000
+        metrics_retention_days = (
+            metrics_retention_days if metrics_retention_days is not None else 30
+        )
+        metrics_max_rows = metrics_max_rows if metrics_max_rows is not None else 5000
+
+    deleted = {"tool_logs": 0, "metrics": 0}
+    now = datetime.now(timezone.utc)
+
+    with _connect() as conn:
+        if log_retention_days and log_retention_days > 0:
+            cutoff = (now - timedelta(days=log_retention_days)).isoformat()
+            cur = conn.execute("DELETE FROM tool_logs WHERE created_at < ?", (cutoff,))
+            deleted["tool_logs"] += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+        if log_max_rows and log_max_rows > 0:
+            cur = conn.execute(
+                """
+                DELETE FROM tool_logs
+                WHERE id NOT IN (
+                    SELECT id FROM tool_logs ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (log_max_rows,),
+            )
+            deleted["tool_logs"] += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+        if metrics_retention_days and metrics_retention_days > 0:
+            cutoff = (now - timedelta(days=metrics_retention_days)).isoformat()
+            cur = conn.execute("DELETE FROM metrics WHERE created_at < ?", (cutoff,))
+            deleted["metrics"] += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+        if metrics_max_rows and metrics_max_rows > 0:
+            cur = conn.execute(
+                """
+                DELETE FROM metrics
+                WHERE id NOT IN (
+                    SELECT id FROM metrics ORDER BY id DESC LIMIT ?
+                )
+                """,
+                (metrics_max_rows,),
+            )
+            deleted["metrics"] += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+
+    return deleted
 
 
 def get_tool_logs(limit: int = 50) -> list[dict]:

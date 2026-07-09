@@ -4,6 +4,8 @@ import secrets
 import tempfile
 import threading
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -35,14 +37,25 @@ from nullain.tools import TOOL_REGISTRY
 
 ALLOWED_ORIGINS = {"http://127.0.0.1:5173", "http://localhost:5173"}
 
-app = FastAPI(title="NULLAIN API", version="0.1.0")
+brain = Brain()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    brain.startup()
+    try:
+        yield
+    finally:
+        brain.shutdown()
+
+
+app = FastAPI(title="NULLAIN API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(ALLOWED_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )
-brain = Brain()
 
 
 def _expected_api_token() -> str:
@@ -114,29 +127,33 @@ class VoiceSpeakRequest(BaseModel):
 
 
 class ConfirmationBroker:
+    """Serializa confirmações: no máximo um modal pendente por vez."""
+
     def __init__(self, timeout_seconds: float | None = None) -> None:
         self._events: dict[str, threading.Event] = {}
         self._responses: dict[str, bool] = {}
+        self._gate = threading.Lock()
         self._timeout_seconds = (
             timeout_seconds if timeout_seconds is not None else _confirm_timeout_seconds()
         )
 
     def request(self, preview: str, send_event) -> bool:
-        request_id = uuid.uuid4().hex
-        event = threading.Event()
-        self._events[request_id] = event
-        send_event(
-            {
-                "type": "confirmation_request",
-                "request_id": request_id,
-                "preview": preview,
-                "timeout_seconds": self._timeout_seconds,
-            }
-        )
-        event.wait(timeout=self._timeout_seconds)
-        approved = self._responses.pop(request_id, False)
-        self._events.pop(request_id, None)
-        return approved
+        with self._gate:
+            request_id = uuid.uuid4().hex
+            event = threading.Event()
+            self._events[request_id] = event
+            send_event(
+                {
+                    "type": "confirmation_request",
+                    "request_id": request_id,
+                    "preview": preview,
+                    "timeout_seconds": self._timeout_seconds,
+                }
+            )
+            event.wait(timeout=self._timeout_seconds)
+            approved = self._responses.pop(request_id, False)
+            self._events.pop(request_id, None)
+            return approved
 
     def respond(self, request_id: str, approved: bool) -> bool:
         event = self._events.get(request_id)
@@ -147,22 +164,15 @@ class ConfirmationBroker:
         return True
 
 
-@app.on_event("startup")
-def on_startup() -> None:
-    brain.startup()
-
-
-@app.on_event("shutdown")
-def on_shutdown() -> None:
-    brain.shutdown()
-
-
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Health público (sem auth) para doctor e probes."""
+    from nullain.workspace import get_workspace_root
+
     return {
         "status": "ok",
         "auth_required": bool(_expected_api_token()),
+        "workspace": str(get_workspace_root()),
     }
 
 

@@ -153,6 +153,15 @@ cp mcp.config.example.json mcp.config.json
 
 Tools MCP com nome ambíguo **exigem confirmação por padrão** (fail-closed). Só nomes claramente de leitura (`list`, `get`, `search`, …) passam sem modal.
 
+### Workspace e retenção
+
+```env
+NULLAIN_WORKSPACE=D:\caminho\do\projeto   # jail de arquivos + cwd do shell
+NULLAIN_TOOL_RESULT_MAX_CHARS=8000        # compacta tool results no contexto do LLM
+NULLAIN_LOG_MAX_ROWS=5000                 # purge de tool_logs no startup
+NULLAIN_METRICS_MAX_ROWS=5000
+```
+
 ## ◻ Roadmap
 
 - [x] Núcleo agêntico (loop de tool-calling + memória)
