@@ -12,6 +12,7 @@ ToolFn = Callable[..., str]
 NATIVE_TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "list_files": {
         "needs_confirmation": False,
+        "source": "native",
         "fn": files.list_files,
         "schema": {
             "type": "function",
@@ -33,6 +34,7 @@ NATIVE_TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "read_file": {
         "needs_confirmation": False,
+        "source": "native",
         "fn": files.read_file,
         "schema": {
             "type": "function",
@@ -54,6 +56,7 @@ NATIVE_TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "write_file": {
         "needs_confirmation": True,
+        "source": "native",
         "fn": files.write_file,
         "schema": {
             "type": "function",
@@ -79,6 +82,7 @@ NATIVE_TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "run_command": {
         "needs_confirmation": True,
+        "source": "native",
         "fn": shell.run_command,
         "schema": {
             "type": "function",
@@ -177,9 +181,11 @@ class ToolRegistry:
                 blocked = self._enforce_extra_confirmation(name, arguments, confirm)
                 if blocked is not None:
                     return blocked
-                return fn(**arguments)
-            if native_needs_confirmation:
-                return fn(**arguments, confirm=confirm)
+            if native_needs_confirmation or entry.get("source") in {"skill", "squad"}:
+                try:
+                    return fn(**arguments, confirm=confirm)
+                except TypeError:
+                    return fn(**arguments)
             return fn(**arguments)
         except TypeError as exc:
             return f"Erro: argumentos inválidos para {name}: {exc}"
@@ -188,27 +194,41 @@ class ToolRegistry:
 
 
 def init_tools(mcp_manager=None) -> int:
+    """Monta TOOL_REGISTRY: nativas + skills + squads + MCP."""
     global _mcp_manager, TOOL_REGISTRY
 
     _mcp_manager = mcp_manager
     TOOL_REGISTRY = dict(NATIVE_TOOL_REGISTRY)
 
-    if mcp_manager is None:
-        return len(TOOL_REGISTRY)
+    try:
+        from nullain.skills.registry import build_skill_tools, get_skill_registry
 
-    for name, binding in mcp_manager.get_tool_bindings().items():
-        TOOL_REGISTRY[name] = {
-            "needs_confirmation": binding.needs_confirmation,
-            "source": "mcp",
-            "schema": {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": f"[MCP:{binding.server_name}] {binding.description}",
-                    "parameters": binding.input_schema,
+        get_skill_registry()  # garante load
+        TOOL_REGISTRY.update(build_skill_tools())
+    except Exception:
+        pass
+
+    try:
+        from nullain.squads.orchestrator import build_squad_tools
+
+        TOOL_REGISTRY.update(build_squad_tools())
+    except Exception:
+        pass
+
+    if mcp_manager is not None:
+        for name, binding in mcp_manager.get_tool_bindings().items():
+            TOOL_REGISTRY[name] = {
+                "needs_confirmation": binding.needs_confirmation,
+                "source": "mcp",
+                "schema": {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": f"[MCP:{binding.server_name}] {binding.description}",
+                        "parameters": binding.input_schema,
+                    },
                 },
-            },
-        }
+            }
 
     return len(TOOL_REGISTRY)
 

@@ -49,8 +49,9 @@ def chat(
 
     status_lines = [
         f"Modelo ativo: [bold]{get_active_model()}[/bold]",
-        f"Tools disponíveis: {total_tools} ({mcp_tool_count} MCP)",
+        f"Tools: {total_tools} ({mcp_tool_count} MCP) · Skills: {core.skill_count}",
         "Comandos: /lembra /fatos /esquece /sair",
+        "Skills: list_skills / run_skill · Squads: run_squad",
         "Use --voice para modo voz local.",
         "Digite /sair para encerrar.",
     ]
@@ -123,6 +124,109 @@ def doctor() -> None:
     console.print(table)
     ok_count, total = score_summary(results)
     console.print(f"{ok_count}/{total} checks OK")
+
+
+@app.command("skills")
+def skills_cmd(
+    reload: bool = typer.Option(False, "--reload", help="Recarrega skills do disco."),
+) -> None:
+    """Lista skills plugáveis (NULLAIN-SKILLS)."""
+    from nullain.skills import get_skill_registry, init_skills, reload_skills
+
+    if reload:
+        count = reload_skills()
+        console.print(f"[green]{count} skill(s) recarregada(s).[/green]")
+    else:
+        init_skills()
+
+    registry = get_skill_registry()
+    table = Table(title="NULLAIN Skills", show_header=True, header_style="bold")
+    table.add_column("Nome")
+    table.add_column("Handler")
+    table.add_column("Confirm")
+    table.add_column("Descrição")
+
+    for skill in registry.list():
+        table.add_row(
+            skill.name,
+            "sim" if skill.handler else "não",
+            "sim" if skill.needs_confirmation else "não",
+            skill.description,
+        )
+
+    if not registry.names():
+        console.print("[dim]Nenhuma skill em ./skills/*/SKILL.md[/dim]")
+    else:
+        console.print(table)
+
+
+@app.command("squad")
+def squad_cmd(
+    goal: str = typer.Argument(..., help="Objetivo do squad multi-agente."),
+    no_llm_plan: bool = typer.Option(
+        False,
+        "--no-llm-plan",
+        help="Usa só roteamento heurístico (sem LLM no planner).",
+    ),
+) -> None:
+    """Executa NULLAIN-SQUADS para um objetivo complexo."""
+    from nullain.config import get_settings
+    from nullain.squads import SquadBudget, SquadOrchestrator
+
+    core = Brain()
+    total_tools, mcp_tool_count = core.startup()
+    settings = get_settings()
+
+    console.print(
+        Panel(
+            f"Objetivo: [bold]{goal}[/bold]\n"
+            f"Tools: {total_tools} ({mcp_tool_count} MCP) · Skills: {core.skill_count}",
+            title="NULLAIN Squad",
+            border_style="white",
+        )
+    )
+
+    budget = SquadBudget(
+        max_roles=settings.nullain_squad_max_roles,
+        max_iterations_per_agent=settings.nullain_squad_max_iterations,
+        max_wall_seconds=settings.nullain_squad_max_wall_seconds,
+    )
+    orchestrator = SquadOrchestrator(
+        budget=budget,
+        use_llm_planner=not no_llm_plan,
+    )
+
+    def on_event(event: dict) -> None:
+        etype = event.get("type")
+        if etype == "squad_plan":
+            console.print(f"[dim]Plano: {event.get('plan')}[/dim]")
+        elif etype == "squad_role_start":
+            console.print(
+                f"[bold]▶ {event.get('role')}[/bold]: {event.get('subtask')}"
+            )
+        elif etype == "squad_role_end":
+            mark = "✓" if event.get("ok") else "✗"
+            console.print(
+                f"[dim]{mark} {event.get('role')} "
+                f"({event.get('duration_ms', 0):.0f}ms)[/dim]"
+            )
+
+    try:
+        result = orchestrator.run(
+            goal,
+            confirm=lambda preview: confirm_action(console, preview),
+            on_event=on_event,
+        )
+    finally:
+        core.shutdown()
+
+    console.print(
+        Panel(
+            Markdown(result.summary),
+            title=f"Squad · {result.duration_ms:.0f}ms",
+            border_style="white",
+        )
+    )
 
 
 @app.command("serve")

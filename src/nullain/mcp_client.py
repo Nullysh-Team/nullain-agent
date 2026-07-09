@@ -266,7 +266,10 @@ class McpManager:
             self._loop,
         )
         try:
-            return future.result(timeout=120)
+            count = future.result(timeout=120)
+            self._connected = True
+            self._start_health_check()
+            return count
         except Exception as exc:
             self._errors.append(str(exc))
             return 0
@@ -284,13 +287,63 @@ class McpManager:
         except Exception:
             pass
 
+    def sync_from_config(self, config_path: Path = CONFIG_PATH) -> dict[str, Any]:
+        """Reload incremental: adiciona/remove/reconecta conforme mcp.config.json."""
+        if not self._loop:
+            self._start_loop_thread()
+        assert self._loop is not None
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._sync_from_config_async(config_path),
+            self._loop,
+        )
+        try:
+            result = future.result(timeout=180)
+            self._connected = True
+            self._start_health_check()
+            return result
+        except Exception as exc:
+            self._errors.append(str(exc))
+            return {
+                "connected": [],
+                "disconnected": [],
+                "reconnected": [],
+                "errors": [str(exc)],
+                "tool_count": len(self._tool_bindings),
+            }
+
+    def health_snapshot(self) -> dict[str, Any]:
+        return {
+            "connected": self._connected,
+            "servers": self.get_server_status(),
+            "tool_count": len(self._tool_bindings),
+            "errors": list(self._errors[-20:]),
+        }
+
+    async def call_tool_async(
+        self,
+        registry_name: str,
+        arguments: dict[str, Any],
+        confirm,
+    ) -> str:
+        """API async (FastAPI) — reusa o loop dedicado do MCP via threadsafe se preciso."""
+        if not self._loop:
+            return "Erro: MCP não conectado."
+        if asyncio.get_running_loop() is self._loop:
+            return await self._call_tool_async(registry_name, arguments, confirm)
+        future = asyncio.run_coroutine_threadsafe(
+            self._call_tool_async(registry_name, arguments, confirm),
+            self._loop,
+        )
+        return await asyncio.wrap_future(future)
+
     def call_tool_sync(
         self,
         registry_name: str,
         arguments: dict[str, Any],
         confirm,
     ) -> str:
-        if not self._loop or not self._connected:
+        if not self._loop:
             return "Erro: MCP não conectado."
 
         future = asyncio.run_coroutine_threadsafe(
@@ -367,6 +420,56 @@ class McpManager:
                 self._errors.append(f"{name}: {exc}")
 
         return len(self._tool_bindings)
+
+    async def _sync_from_config_async(self, config_path: Path) -> dict[str, Any]:
+        desired: dict[str, dict[str, Any]] = {}
+        if config_path.exists():
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            for server in config.get("servers", []):
+                name = server.get("name")
+                if name:
+                    desired[name] = server
+
+        connected: list[str] = []
+        disconnected: list[str] = []
+        reconnected: list[str] = []
+        errors: list[str] = []
+
+        current_names = set(self._server_configs.keys()) | set(self._servers.keys())
+        for name in sorted(current_names - set(desired.keys())):
+            try:
+                await self._disconnect_server_async(name)
+                self._server_configs.pop(name, None)
+                disconnected.append(name)
+            except Exception as exc:
+                errors.append(f"disconnect {name}: {exc}")
+
+        for name, server in desired.items():
+            previous = self._server_configs.get(name)
+            if previous == server and name in self._servers:
+                status = self._server_status.get(name)
+                if status and status.state == ServerState.CONNECTED:
+                    continue
+            try:
+                was_connected = name in self._servers
+                await self._connect_server_async(server)
+                if was_connected:
+                    reconnected.append(name)
+                else:
+                    connected.append(name)
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+
+        if errors:
+            self._errors.extend(errors)
+
+        return {
+            "connected": connected,
+            "disconnected": disconnected,
+            "reconnected": reconnected,
+            "errors": errors,
+            "tool_count": len(self._tool_bindings),
+        }
 
     async def _connect_server_async(self, server: dict[str, Any]) -> int:
         name = server["name"]

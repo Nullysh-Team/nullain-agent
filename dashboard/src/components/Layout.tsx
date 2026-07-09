@@ -5,6 +5,7 @@ const links = [
   { to: "/brain", label: "Cérebro", end: false },
   { to: "/tokens", label: "Tokens", end: false },
   { to: "/integrations", label: "Integrações", end: false },
+  { to: "/skills", label: "Skills", end: false },
   { to: "/memory", label: "Memória", end: false },
   { to: "/metrics", label: "Métricas", end: false },
   { to: "/logs", label: "Logs", end: false },

@@ -177,6 +177,54 @@ export const api = {
     }),
   deleteMcpServer: (name: string) =>
     request<{ deleted: boolean }>(`/mcp/servers/${name}`, { method: "DELETE" }),
+  getMcpStatus: () =>
+    request<{
+      connected: boolean;
+      servers: McpServerStatus[];
+      tool_count: number;
+      errors: string[];
+    }>("/mcp/status"),
+  reloadMcp: () =>
+    request<{
+      connected: string[];
+      disconnected: string[];
+      reconnected: string[];
+      errors: string[];
+      tool_count: number;
+      tools?: number;
+    }>("/mcp/reload", { method: "POST" }),
+  getSkills: () =>
+    request<
+      {
+        name: string;
+        description: string;
+        needs_confirmation: boolean;
+        tools: string[];
+        has_handler: boolean;
+        path: string;
+      }[]
+    >("/skills"),
+  reloadSkills: () =>
+    request<{ skills: number; tools: number }>("/skills/reload", {
+      method: "POST",
+    }),
+  getSquadRoles: () =>
+    request<
+      {
+        name: string;
+        description: string;
+        tools: string[];
+        confirm_all: boolean;
+      }[]
+    >("/squads/roles"),
+  runSquad: (goal: string, opts?: { use_llm_planner?: boolean }) =>
+    request<Record<string, unknown>>("/squads/run", {
+      method: "POST",
+      body: JSON.stringify({
+        goal,
+        use_llm_planner: opts?.use_llm_planner ?? true,
+      }),
+    }),
   getLogs: (limit = 50) => request<ToolLog[]>(`/logs?limit=${limit}`),
   getMetrics: (limit = 50) =>
     request<MetricsResponse>(`/metrics?limit=${limit}`),

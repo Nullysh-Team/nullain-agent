@@ -29,8 +29,21 @@ def get_system_message(query: str | None = None) -> dict[str, str]:
 
     Para cache de prompt do provider, o system prompt deve ser fixo por sessão.
     Fatos são injetados como mensagem separada via ``get_facts_message``.
+    Skills/squads entram como bloco estável curto (lista de nomes).
     """
     content = get_base_prompt()
+    try:
+        from nullain.skills import get_skill_registry
+
+        skills_block = get_skill_registry().format_for_prompt()
+        if skills_block:
+            content = f"{content}\n\n{skills_block}"
+    except Exception:
+        pass
+    content += (
+        "\n\nVocê pode usar list_squad_roles e run_squad para objetivos multi-etapa "
+        "com sub-agentes especializados."
+    )
     return {"role": "system", "content": content}
 
 

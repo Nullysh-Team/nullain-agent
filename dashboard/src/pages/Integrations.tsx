@@ -29,7 +29,23 @@ export function IntegrationsPage() {
 
   useEffect(() => {
     loadData().catch((error: Error) => setStatus(error.message));
+    const timer = window.setInterval(() => {
+      loadData().catch(() => {});
+    }, 10000);
+    return () => window.clearInterval(timer);
   }, []);
+
+  async function handleReloadMcp() {
+    try {
+      const result = await api.reloadMcp();
+      await loadData();
+      setStatus(
+        `MCP reload: +${result.connected.length} ~${result.reconnected.length} -${result.disconnected.length} · tools ${result.tool_count}`,
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Erro no reload MCP.");
+    }
+  }
 
   const toolsByServer = useMemo(() => {
     const map = new Map<string, ToolInfo[]>();
@@ -82,11 +98,20 @@ export function IntegrationsPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <header>
-        <h1 className="text-2xl font-light tracking-wide">Integrações</h1>
-        <p className="mt-2 text-sm text-[#666]">
-          Servidores MCP configurados e tools expostas por servidor.
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-light tracking-wide">Integrações</h1>
+          <p className="mt-2 text-sm text-[#666]">
+            Servidores MCP com health em tempo real (poll 10s) e reload incremental.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleReloadMcp}
+          className="border border-white px-4 py-2 text-xs tracking-wide uppercase transition hover:bg-white hover:text-black"
+        >
+          Reload MCP
+        </button>
       </header>
 
       <Panel title="Adicionar servidor">

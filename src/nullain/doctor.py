@@ -274,6 +274,26 @@ def _check_workspace() -> CheckResult:
     return CheckResult("Workspace", exists, detail, hint)
 
 
+def _check_skills() -> CheckResult:
+    from nullain.skills import get_skill_registry, init_skills
+
+    try:
+        init_skills()
+        names = get_skill_registry().names()
+    except Exception as exc:
+        return CheckResult("Skills", False, str(exc), "Verifique ./skills/*/SKILL.md")
+
+    if not names:
+        return CheckResult(
+            "Skills",
+            True,
+            "nenhuma (opcional)",
+            "Crie skills em ./skills/*/SKILL.md",
+            mandatory=False,
+        )
+    return CheckResult("Skills", True, f"{len(names)}: {', '.join(names[:5])}", mandatory=False)
+
+
 def run_checks() -> list[CheckResult]:
     checks: list[CheckResult] = [
         _run_check("Python >= 3.13", _check_python),
@@ -291,6 +311,7 @@ def run_checks() -> list[CheckResult]:
             _run_check("Banco SQLite", _check_sqlite),
             _run_check("Busca semântica", _check_semantic_search),
             _run_check("Workspace", _check_workspace),
+            _run_check("Skills", _check_skills),
             _run_check("mcp.config.json", _check_mcp_config),
             _run_check(f"Porta {DEFAULT_PORT}", _check_port),
             _run_check("Métricas de latência", _check_latency_metrics),

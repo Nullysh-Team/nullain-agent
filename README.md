@@ -162,6 +162,20 @@ NULLAIN_LOG_MAX_ROWS=5000                 # purge de tool_logs no startup
 NULLAIN_METRICS_MAX_ROWS=5000
 ```
 
+### Skills & Squads
+
+```bash
+# Skills em ./skills/*/SKILL.md (+ handler.py opcional)
+uv run nullain skills
+uv run nullain skills --reload
+
+# Squad multi-agente (research / engineering / ops)
+uv run nullain squad "pesquise o projeto e proponha um fix no README"
+```
+
+No chat: tools `list_skills`, `run_skill`, `list_squad_roles`, `run_squad`.  
+Dashboard: página **Skills** e **Reload MCP** em Integrações.
+
 ## ◻ Roadmap
 
 - [x] Núcleo agêntico (loop de tool-calling + memória)
@@ -169,10 +183,10 @@ NULLAIN_METRICS_MAX_ROWS=5000
 - [x] Integrações via MCP
 - [x] Dashboard de controle (config, tokens, memória, logs)
 - [x] Voz local offline
+- [x] NULLAIN-SQUADS — orquestração multi-agente (v0)
+- [x] NULLAIN-SKILLS — registro extensível de capacidades (v0)
 - [ ] Loop Engineering — auto-iteração controlada
 - [ ] NULLAIN-CODING — harness de engenharia
-- [ ] NULLAIN-SQUADS — orquestração multi-agente
-- [ ] NULLAIN-SKILLS — registro extensível de capacidades
 
 ---
 

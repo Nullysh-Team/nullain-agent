@@ -300,6 +300,67 @@ def remove_mcp_server(name: str) -> dict[str, bool]:
     return {"deleted": deleted}
 
 
+@app.get("/mcp/status", dependencies=[Depends(require_api_token)])
+def get_mcp_status() -> dict[str, Any]:
+    return brain.mcp_manager.health_snapshot()
+
+
+@app.post("/mcp/reload", dependencies=[Depends(require_api_token)])
+def post_mcp_reload() -> dict[str, Any]:
+    """Reload incremental a partir de mcp.config.json (sem derrubar tudo se possível)."""
+    return brain.reload_mcp_incremental()
+
+
+@app.get("/skills", dependencies=[Depends(require_api_token)])
+def get_skills() -> list[dict[str, Any]]:
+    from nullain.skills import get_skill_registry
+
+    return get_skill_registry().to_public_list()
+
+
+@app.post("/skills/reload", dependencies=[Depends(require_api_token)])
+def post_skills_reload() -> dict[str, Any]:
+    return brain.reload_skills()
+
+
+@app.get("/squads/roles", dependencies=[Depends(require_api_token)])
+def get_squad_roles() -> list[dict[str, Any]]:
+    from nullain.squads import list_roles
+
+    return list_roles()  # type: ignore[return-value]
+
+
+class SquadRunRequest(BaseModel):
+    goal: str
+    use_llm_planner: bool = True
+    max_roles: int | None = None
+    max_iterations: int | None = None
+
+
+@app.post("/squads/run", dependencies=[Depends(require_api_token)])
+def post_squad_run(payload: SquadRunRequest) -> dict[str, Any]:
+    """Executa squad de forma síncrona (confirmação auto-aprovada via API)."""
+    from nullain.config import get_settings
+    from nullain.squads import SquadBudget, SquadOrchestrator
+
+    settings = get_settings()
+    budget = SquadBudget(
+        max_roles=payload.max_roles or settings.nullain_squad_max_roles,
+        max_iterations_per_agent=payload.max_iterations
+        or settings.nullain_squad_max_iterations,
+        max_wall_seconds=settings.nullain_squad_max_wall_seconds,
+    )
+    orchestrator = SquadOrchestrator(
+        budget=budget,
+        use_llm_planner=payload.use_llm_planner,
+    )
+    # API REST não tem UI de confirmação por tool — fail-closed exige confirm.
+    # Usuários autenticados na API local aprovam implicitamente o run; tools
+    # sensíveis ainda passam pelo confirm (aprovado aqui de forma explícita).
+    result = orchestrator.run(payload.goal.strip(), confirm=lambda _preview: True)
+    return result.to_dict()
+
+
 @app.get("/logs", dependencies=[Depends(require_api_token)])
 def get_logs(limit: int = 50) -> list[dict[str, Any]]:
     return memory.get_tool_logs(limit=limit)

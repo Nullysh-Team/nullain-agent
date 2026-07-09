@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     nullain_log_max_rows: int = 5000
     nullain_metrics_retention_days: int = 30
     nullain_metrics_max_rows: int = 5000
+    # Pasta de skills (vazio = ./skills no cwd)
+    nullain_skills_dir: str = ""
+    # Budget padrão do SQUADS
+    nullain_squad_max_roles: int = 3
+    nullain_squad_max_iterations: int = 5
+    nullain_squad_max_wall_seconds: float = 300.0
 
 
 @lru_cache
