@@ -9,7 +9,7 @@ from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain import memory
 from nullain.cli_helpers import confirm_action, handle_memory_command, refresh_system_message
-from nullain.persona import get_system_message
+from nullain.persona import build_session_messages
 from nullain.runtime import get_active_model
 from nullain.voice.audio import play_wav_bytes, record_seconds
 from nullain.voice.stt import transcribe_file
@@ -19,7 +19,7 @@ from nullain.voice.tts import resolve_piper_model_path, synthesize_wav_bytes
 
 def run_voice_session(console: Console) -> None:
     session_id = str(uuid.uuid4())
-    messages: list[dict[str, str]] = [get_system_message()]
+    messages: list[dict[str, str]] = build_session_messages()
 
     core = Brain()
     total_tools, mcp_tool_count = core.startup()

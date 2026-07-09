@@ -3,7 +3,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from nullain import memory
-from nullain.persona import get_system_message
+from nullain.persona import get_facts_message, get_system_message
 from nullain.ui.spinner import status
 
 
@@ -34,13 +34,32 @@ def _last_user_query(messages: list[dict[str, str]]) -> str | None:
     return None
 
 
+def _is_facts_message(message: dict[str, str]) -> bool:
+    if message.get("role") != "system":
+        return False
+    content = message.get("content") or ""
+    return isinstance(content, str) and content.startswith("Fatos conhecidos")
+
+
 def refresh_system_message(messages: list[dict[str, str]]) -> None:
+    """Atualiza apenas o bloco de fatos — system prompt permanece estável para cache."""
     query = _last_user_query(messages)
-    system_message = get_system_message(query=query)
-    if messages and messages[0]["role"] == "system":
-        messages[0] = system_message
-    else:
-        messages.insert(0, system_message)
+    facts = get_facts_message(query=query)
+
+    for index, message in enumerate(messages):
+        if _is_facts_message(message):
+            if facts is not None:
+                messages[index] = facts
+            else:
+                messages.pop(index)
+            return
+
+    if facts is not None:
+        if messages and messages[0]["role"] == "system":
+            messages.insert(1, facts)
+        else:
+            messages.insert(0, get_system_message())
+            messages.insert(1, facts)
 
 
 def print_facts(console: Console) -> None:

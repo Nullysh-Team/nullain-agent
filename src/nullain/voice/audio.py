@@ -1,5 +1,7 @@
 import io
+import os
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -22,8 +24,13 @@ def record_seconds(seconds: float | None = None) -> str:
     )
     sd.wait()
 
-    temp_path = tempfile.mktemp(suffix=".wav")
-    sf.write(temp_path, audio, SAMPLE_RATE)
+    fd, temp_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    try:
+        sf.write(temp_path, audio, SAMPLE_RATE)
+    except Exception:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
     return temp_path
 
 

@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from typing import Any
 
 from rich.console import Console
 
 from nullain import memory
 from nullain.history import trim_history
-from nullain.llm import complete, complete_stream
+from nullain.llm import complete, complete_stream, extract_usage
 from nullain.tools import ToolRegistry, parse_tool_arguments
 from nullain.ui.spinner import status
 
 ConfirmFn = Callable[[str], bool]
 EventFn = Callable[[dict[str, Any]], None]
+
+CONFIRM_TIMEOUT_SECONDS = 120.0
 
 
 @dataclass
@@ -24,6 +28,40 @@ class ToolCall:
     id: str
     name: str
     arguments: str
+
+
+@dataclass
+class _TurnStats:
+    turn_start: float = 0.0
+    ttft_ms: float | None = None
+    tool_durations: list[float] = field(default_factory=list)
+    iterations: int = 0
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+
+
+def _confirm_timeout() -> float:
+    try:
+        from nullain.config import get_settings
+
+        value = get_settings().nullain_confirm_timeout_seconds
+        if value and value > 0:
+            return float(value)
+    except Exception:
+        pass
+    return float(CONFIRM_TIMEOUT_SECONDS)
+
+
+def _confirm_with_timeout(confirm: ConfirmFn, preview: str) -> bool:
+    """Executa confirmação com timeout — evita travar o turno indefinidamente."""
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(confirm, preview)
+        try:
+            return future.result(timeout=_confirm_timeout())
+        except concurrent.futures.TimeoutError:
+            return False
 
 
 class Agent:
@@ -40,6 +78,7 @@ class Agent:
         confirm_all: bool = False,
         console: Console | None = None,
         session_id: str | None = None,
+        parallel_tools: bool = True,
     ) -> None:
         self.registry = ToolRegistry(
             dict(registry._tools),
@@ -54,6 +93,7 @@ class Agent:
         self.on_event = on_event
         self.console = console
         self.session_id = session_id
+        self.parallel_tools = parallel_tools
 
     def _tool_call_from_native(self, tool_call: Any) -> ToolCall:
         return ToolCall(
@@ -164,18 +204,126 @@ class Agent:
             return f"Erro: tool não permitida para este agente: {name}"
         return self.registry.execute(name, arguments, confirm=self.confirm)
 
+    def _execute_single_tool(
+        self,
+        tool_call: ToolCall,
+        arguments: dict[str, Any],
+        stats: _TurnStats,
+    ) -> tuple[str, str]:
+        """Executa uma tool e retorna (tool_call_id, result)."""
+        if self.console is not None:
+            self.console.print(f"[dim]Tool: {tool_call.name}({arguments})[/dim]")
+
+        self._emit(
+            {
+                "type": "tool_call",
+                "name": tool_call.name,
+                "arguments": arguments,
+            }
+        )
+
+        tool_start = time.monotonic()
+        with status(self.console, "tool_call"):
+            result = self._execute_tool_call(tool_call.name, arguments)
+        tool_duration = (time.monotonic() - tool_start) * 1000
+        stats.tool_durations.append(tool_duration)
+
+        memory.log_tool_call(
+            tool_call.name,
+            arguments,
+            result,
+            session_id=self.session_id,
+        )
+
+        self._emit(
+            {
+                "type": "tool_result",
+                "name": tool_call.name,
+                "result": result,
+                "duration_ms": round(tool_duration, 1),
+            }
+        )
+
+        return tool_call.id, result
+
+    def _execute_tools(
+        self,
+        tool_calls: list[ToolCall],
+        stats: _TurnStats,
+    ) -> list[dict[str, Any]]:
+        """Executa tool calls — em paralelo se independentes, sequencial caso contrário."""
+        parsed: list[tuple[ToolCall, dict[str, Any]]] = []
+        for tool_call in tool_calls:
+            arguments = parse_tool_arguments(tool_call.arguments)
+            parsed.append((tool_call, arguments))
+
+        if not self.parallel_tools or len(parsed) <= 1:
+            results: list[dict[str, Any]] = []
+            for tool_call, arguments in parsed:
+                tool_id, result = self._execute_single_tool(tool_call, arguments, stats)
+                results.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": result,
+                    }
+                )
+            return results
+
+        with ThreadPoolExecutor(max_workers=min(len(parsed), 4)) as pool:
+            futures = {
+                pool.submit(self._execute_single_tool, tc, args, stats): tc
+                for tc, args in parsed
+            }
+            ordered: dict[str, str] = {}
+            for future in futures:
+                tool_id, result = future.result()
+                ordered[tool_id] = result
+
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": ordered.get(tool_call.id, "Erro: resultado perdido"),
+            }
+            for tool_call, _ in parsed
+        ]
+
+    def _log_metrics(self, stats: _TurnStats) -> None:
+        total_ms = (time.monotonic() - stats.turn_start) * 1000
+        memory.log_turn_metrics(
+            memory.TurnMetrics(
+                session_id=self.session_id,
+                turn_index=stats.iterations,
+                ttft_ms=stats.ttft_ms,
+                total_ms=total_ms,
+                iterations=stats.iterations,
+                tokens_in=stats.tokens_in,
+                tokens_out=stats.tokens_out,
+                tool_count=len(stats.tool_durations),
+                tool_total_ms=sum(stats.tool_durations),
+                model=self.model,
+            )
+        )
+
     def run(self, messages: list[dict[str, Any]]) -> str:
         tools = self.registry.schemas()
+        stats = _TurnStats(turn_start=time.monotonic())
 
         for _ in range(self.max_iterations):
             messages[:] = trim_history(messages, model=self.model)
+            stats.iterations += 1
 
             self._emit({"type": "thinking"})
 
             streamed_to_console = False
+            first_chunk_time: float | None = None
 
             def _on_chunk(chunk: str) -> None:
-                nonlocal streamed_to_console
+                nonlocal first_chunk_time, streamed_to_console
+                if first_chunk_time is None:
+                    first_chunk_time = time.monotonic()
+                    stats.ttft_ms = (first_chunk_time - stats.turn_start) * 1000
                 self._emit({"type": "answer_chunk", "content": chunk})
                 if self.console is not None:
                     self.console.print(chunk, end="")
@@ -190,13 +338,22 @@ class Agent:
                         temperature=self.temperature,
                         on_chunk=_on_chunk,
                     )
-                except Exception:
-                    response = complete(
-                        messages,
-                        model=self.model,
-                        tools=tools,
-                        temperature=self.temperature,
-                    )
+                except Exception as exc:
+                    from nullain.llm import LLMNetworkError, LLMStreamError
+
+                    if isinstance(exc, (LLMNetworkError, LLMStreamError)):
+                        response = complete(
+                            messages,
+                            model=self.model,
+                            tools=tools,
+                            temperature=self.temperature,
+                        )
+                    else:
+                        raise
+
+            usage = extract_usage(response)
+            stats.tokens_in = usage["tokens_in"]
+            stats.tokens_out = usage["tokens_out"]
 
             message = response.choices[0].message
             tool_calls = self._resolve_tool_calls(message)
@@ -204,48 +361,13 @@ class Agent:
             if tool_calls:
                 messages.append(self._assistant_message(message, tool_calls))
 
-                for tool_call in tool_calls:
-                    arguments = parse_tool_arguments(tool_call.arguments)
-
-                    if self.console is not None:
-                        self.console.print(f"[dim]Tool: {tool_call.name}({arguments})[/dim]")
-
-                    self._emit(
-                        {
-                            "type": "tool_call",
-                            "name": tool_call.name,
-                            "arguments": arguments,
-                        }
-                    )
-
-                    with status(self.console, "tool_call"):
-                        result = self._execute_tool_call(tool_call.name, arguments)
-                    memory.log_tool_call(
-                        tool_call.name,
-                        arguments,
-                        result,
-                        session_id=self.session_id,
-                    )
-
-                    self._emit(
-                        {
-                            "type": "tool_result",
-                            "name": tool_call.name,
-                            "result": result,
-                        }
-                    )
-
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        }
-                    )
+                tool_messages = self._execute_tools(tool_calls, stats)
+                messages.extend(tool_messages)
                 continue
 
             content = (message.content or "").strip()
             if not content:
+                self._log_metrics(stats)
                 raise RuntimeError("O modelo retornou uma resposta vazia.")
 
             if streamed_to_console and self.console is not None:
@@ -253,6 +375,9 @@ class Agent:
 
             messages.append({"role": "assistant", "content": content})
             self._emit({"type": "answer", "content": content})
+
+            self._log_metrics(stats)
             return content
 
+        self._log_metrics(stats)
         raise RuntimeError(f"Limite de iterações do agente atingido ({self.max_iterations}).")

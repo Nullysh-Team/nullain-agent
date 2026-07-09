@@ -20,6 +20,7 @@ class Brain:
             return
         self.mcp_manager.disconnect()
         shutdown_tools()
+        memory.stop_background_writer()
         self.started = False
 
     def reload_mcp(self) -> tuple[int, int]:
@@ -29,6 +30,16 @@ class Brain:
         total = init_tools(self.mcp_manager)
         return total, mcp_count
 
+    def add_mcp_server(self, server_config: dict) -> int:
+        return self.mcp_manager.connect_server(server_config)
+
+    def remove_mcp_server(self, name: str) -> None:
+        self.mcp_manager.disconnect_server(name)
+
     @property
     def mcp_errors(self) -> list[str]:
         return self.mcp_manager.errors
+
+    @property
+    def mcp_server_status(self) -> list[dict]:
+        return self.mcp_manager.get_server_status()

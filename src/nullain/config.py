@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     nullain_piper_voice: str = "pt_BR-faber-medium"
     nullain_piper_model_path: str = ""
     nullain_voice_record_seconds: float = 5.0
+    # Token local da API. Vazio = auth desligada (dev). Com valor, REST/WS exigem Bearer.
+    nullain_api_token: str = ""
+    nullain_confirm_timeout_seconds: float = 120.0
 
 
 @lru_cache

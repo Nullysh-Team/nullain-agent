@@ -1,7 +1,13 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
-export type GlobeState = "idle" | "thinking" | "tool_call" | "answer";
+export type GlobeState =
+  | "idle"
+  | "thinking"
+  | "tool_call"
+  | "answer"
+  | "degraded"
+  | "waiting_confirmation";
 
 type NeuralGlobeProps = {
   state: GlobeState;
@@ -105,7 +111,7 @@ export function NeuralGlobe({ state }: NeuralGlobeProps) {
     const animate = (time: number) => {
       const elapsed = (time - start) * 0.001;
       const pulseSpeed =
-        state === "thinking" ? 4.5 : state === "answer" ? 3.2 : state === "tool_call" ? 2.8 : 1.2;
+        state === "thinking" ? 4.5 : state === "answer" ? 3.2 : state === "tool_call" ? 2.8 : state === "waiting_confirmation" ? 1.8 : state === "degraded" ? 0.8 : 1.2;
       const pulse = (Math.sin(elapsed * pulseSpeed) + 1) * 0.5;
       const rotationSpeed =
         state === "thinking" ? 0.0035 : state === "tool_call" ? 0.005 : 0.0018;
@@ -125,7 +131,11 @@ export function NeuralGlobe({ state }: NeuralGlobeProps) {
             ? 0.14 + Math.abs(Math.sin(elapsed * 6)) * 0.2
             : state === "answer"
               ? 0.16 + pulse * 0.18
-              : 0.1 + pulse * 0.08;
+              : state === "degraded"
+                ? 0.06 + pulse * 0.04
+                : state === "waiting_confirmation"
+                  ? 0.12 + pulse * 0.16
+                  : 0.1 + pulse * 0.08;
       lineMaterial.opacity = lineOpacity;
 
       glow.intensity = 0.25 + pulse * (state === "idle" ? 0.15 : 0.45);

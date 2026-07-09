@@ -10,7 +10,7 @@ from nullain.agent import run_agent
 from nullain.brain import Brain
 from nullain.cli_helpers import confirm_action, handle_memory_command, refresh_system_message
 from nullain.doctor import run_checks, score_summary, status_mark
-from nullain.persona import get_system_message
+from nullain.persona import build_session_messages
 from nullain.runtime import get_active_model
 from nullain import memory
 from nullain.voice_session import run_voice_session
@@ -42,7 +42,7 @@ def chat(
         return
 
     session_id = str(uuid.uuid4())
-    messages: list[dict[str, str]] = [get_system_message()]
+    messages: list[dict[str, str]] = build_session_messages()
 
     core = Brain()
     total_tools, mcp_tool_count = core.startup()
@@ -130,10 +130,21 @@ def serve(host: str = "127.0.0.1", port: int = 8420) -> None:
     """Inicia a API local do NULLAIN."""
     import uvicorn
 
+    from nullain.config import get_settings
+
+    token = (get_settings().nullain_api_token or "").strip()
+    auth_line = (
+        "Auth: [bold green]Bearer token ativo[/bold green] (NULLAIN_API_TOKEN)"
+        if token
+        else "Auth: [bold yellow]desligada[/bold yellow] — defina NULLAIN_API_TOKEN no .env"
+    )
+
     console.print(
         Panel(
             f"API em [bold]http://{host}:{port}[/bold]\n"
-            f"Docs: [bold]http://{host}:{port}/docs[/bold]",
+            f"Docs: [bold]http://{host}:{port}/docs[/bold]\n"
+            f"Health: [bold]http://{host}:{port}/health[/bold]\n"
+            f"{auth_line}",
             title="NULLAIN serve",
             border_style="white",
         )

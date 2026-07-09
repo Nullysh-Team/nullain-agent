@@ -12,6 +12,8 @@ SYSTEM_PROMPT = (
     + (_WINDOWS_HINT if platform.system() == "Windows" else "")
 )
 
+FACTS_HEADER = "Fatos conhecidos sobre Netty:"
+
 
 def get_base_prompt() -> str:
     from nullain.memory import get_setting
@@ -23,11 +25,30 @@ def get_base_prompt() -> str:
 
 
 def get_system_message(query: str | None = None) -> dict[str, str]:
+    """System prompt estável — NÃO inclui fatos dinâmicos.
+
+    Para cache de prompt do provider, o system prompt deve ser fixo por sessão.
+    Fatos são injetados como mensagem separada via ``get_facts_message``.
+    """
+    content = get_base_prompt()
+    return {"role": "system", "content": content}
+
+
+def get_facts_message(query: str | None = None) -> dict[str, str] | None:
+    """Mensagem de fatos como bloco separado — não invalida cache do system prompt."""
     from nullain.memory import format_facts_for_prompt
 
-    content = get_base_prompt()
     facts_block = format_facts_for_prompt(query=query)
-    if facts_block:
-        content = f"{content}\n\n{facts_block}"
+    if not facts_block:
+        return None
 
-    return {"role": "system", "content": content}
+    return {"role": "system", "content": facts_block}
+
+
+def build_session_messages(query: str | None = None) -> list[dict[str, str]]:
+    """Constrói mensagens iniciais: system prompt estável + fatos (se houver)."""
+    messages = [get_system_message()]
+    facts = get_facts_message(query=query)
+    if facts is not None:
+        messages.append(facts)
+    return messages

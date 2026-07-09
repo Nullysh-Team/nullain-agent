@@ -242,6 +242,27 @@ def _check_port() -> CheckResult:
     )
 
 
+def _check_latency_metrics() -> CheckResult:
+    try:
+        percentiles = memory.get_metric_percentiles("ttft_ms", limit=100)
+    except Exception:
+        return CheckResult("Métricas de latência", True, "—", mandatory=False)
+
+    count = percentiles.get("count", 0)
+    if count == 0:
+        return CheckResult(
+            "Métricas de latência",
+            True,
+            "sem dados (nenhum turno medido ainda)",
+            mandatory=False,
+        )
+
+    p50 = percentiles.get("p50")
+    p95 = percentiles.get("p95")
+    detail = f"TTFT p50={p50:.0f}ms p95={p95:.0f}ms ({count} turnos)" if p50 and p95 else f"{count} turnos"
+    return CheckResult("Métricas de latência", True, detail, mandatory=False)
+
+
 def run_checks() -> list[CheckResult]:
     checks: list[CheckResult] = [
         _run_check("Python >= 3.13", _check_python),
@@ -260,6 +281,7 @@ def run_checks() -> list[CheckResult]:
             _run_check("Busca semântica", _check_semantic_search),
             _run_check("mcp.config.json", _check_mcp_config),
             _run_check(f"Porta {DEFAULT_PORT}", _check_port),
+            _run_check("Métricas de latência", _check_latency_metrics),
         ]
     )
     return checks

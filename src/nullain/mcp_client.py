@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import sys
 import threading
+import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -22,8 +25,11 @@ try:
 except ImportError:
     streamable_http_client = None  # type: ignore[assignment,misc]
 
+logger = logging.getLogger("nullain.mcp")
+
 CONFIG_PATH = Path("mcp.config.json")
 
+# Tools com estes trechos no nome sempre exigem confirmação.
 WRITE_KEYWORDS = (
     "write",
     "create",
@@ -36,7 +42,60 @@ WRITE_KEYWORDS = (
     "put",
     "patch",
     "remove",
+    "execute",
+    "run",
+    "send",
+    "transfer",
+    "deploy",
+    "destroy",
+    "drop",
+    "insert",
+    "mutate",
+    "invoke",
+    "call",
+    "publish",
+    "upload",
+    "grant",
+    "revoke",
 )
+
+# Apenas tools com nome claramente de leitura pulam confirmação.
+# Qualquer tool fora desta allowlist exige confirmação (fail-closed).
+SAFE_READ_KEYWORDS = (
+    "list",
+    "get",
+    "read",
+    "search",
+    "find",
+    "fetch",
+    "query",
+    "show",
+    "describe",
+    "status",
+    "info",
+    "help",
+    "ping",
+    "health",
+    "count",
+    "stat",
+    "view",
+    "inspect",
+    "check",
+    "lookup",
+)
+
+DEFAULT_TOOL_TIMEOUT = 30.0
+HEALTH_CHECK_INTERVAL = 60.0
+RECONNECT_BASE_DELAY = 1.0
+RECONNECT_MAX_DELAY = 60.0
+RECONNECT_MAX_ATTEMPTS = 5
+
+
+class ServerState(str, Enum):
+    CONNECTED = "connected"
+    DEGRADED = "degraded"
+    RECONNECTING = "reconnecting"
+    DISABLED = "disabled"
 
 
 @dataclass
@@ -54,6 +113,16 @@ class ServerConnection:
     name: str
     session: ClientSession
     stack: AsyncExitStack
+
+
+@dataclass
+class ServerStatus:
+    name: str
+    state: ServerState = ServerState.DISABLED
+    last_error: str = ""
+    tool_count: int = 0
+    last_health_check: float = 0.0
+    reconnect_attempts: int = 0
 
 
 def _substitute_env(value: str) -> str:
@@ -74,8 +143,16 @@ def _resolve_command(command: str) -> str:
 
 
 def _tool_needs_confirmation(tool_name: str) -> bool:
+    """Fail-closed: só tools com nome claramente de leitura pulam confirmação.
+
+    Write-like sempre confirmam. Nomes ambíguos (ex.: execute, transfer) também.
+    """
     lower = tool_name.lower()
-    return any(keyword in lower for keyword in WRITE_KEYWORDS)
+    if any(keyword in lower for keyword in WRITE_KEYWORDS):
+        return True
+    if any(keyword in lower for keyword in SAFE_READ_KEYWORDS):
+        return False
+    return True
 
 
 def _format_call_result(result: types.CallToolResult) -> str:
@@ -113,6 +190,9 @@ class McpManager:
         self._servers: dict[str, ServerConnection] = {}
         self._tool_bindings: dict[str, McpToolBinding] = {}
         self._errors: list[str] = []
+        self._server_status: dict[str, ServerStatus] = {}
+        self._server_configs: dict[str, dict[str, Any]] = {}
+        self._health_task: asyncio.Task | None = None
 
     @property
     def errors(self) -> list[str]:
@@ -120,6 +200,18 @@ class McpManager:
 
     def get_tool_bindings(self) -> dict[str, McpToolBinding]:
         return dict(self._tool_bindings)
+
+    def get_server_status(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": status.name,
+                "state": status.state.value,
+                "last_error": status.last_error,
+                "tool_count": status.tool_count,
+                "reconnect_attempts": status.reconnect_attempts,
+            }
+            for status in self._server_status.values()
+        ]
 
     def connect(self, config_path: Path = CONFIG_PATH) -> int:
         if self._connected:
@@ -135,6 +227,7 @@ class McpManager:
         try:
             count = future.result(timeout=120)
             self._connected = True
+            self._start_health_check()
             return count
         except Exception as exc:
             self._errors.append(str(exc))
@@ -145,6 +238,7 @@ class McpManager:
             return
 
         if self._connected:
+            self._stop_health_check()
             future = asyncio.run_coroutine_threadsafe(
                 self._disconnect_async(),
                 self._loop,
@@ -157,7 +251,38 @@ class McpManager:
         self._connected = False
         self._servers.clear()
         self._tool_bindings.clear()
+        self._server_status.clear()
+        self._server_configs.clear()
         self._stop_loop_thread()
+
+    def connect_server(self, server_config: dict[str, Any]) -> int:
+        """Conecta um único servidor sem derrubar os outros (reload incremental)."""
+        if not self._loop:
+            self._start_loop_thread()
+
+        assert self._loop is not None
+        future = asyncio.run_coroutine_threadsafe(
+            self._connect_server_async(server_config),
+            self._loop,
+        )
+        try:
+            return future.result(timeout=120)
+        except Exception as exc:
+            self._errors.append(str(exc))
+            return 0
+
+    def disconnect_server(self, name: str) -> None:
+        if not self._loop:
+            return
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._disconnect_server_async(name),
+            self._loop,
+        )
+        try:
+            future.result(timeout=30)
+        except Exception:
+            pass
 
     def call_tool_sync(
         self,
@@ -200,6 +325,32 @@ class McpManager:
         self._loop = None
         self._thread = None
 
+    def _start_health_check(self) -> None:
+        if not self._loop or self._health_task is not None:
+            return
+
+        async def _run_health_check() -> None:
+            while self._connected:
+                await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+                await self._health_check_all()
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._health_check_all(),
+            self._loop,
+        )
+        try:
+            future.result(timeout=5)
+        except Exception:
+            pass
+
+        if self._loop:
+            self._health_task = self._loop.create_task(_run_health_check())
+
+    def _stop_health_check(self) -> None:
+        if self._health_task and self._loop:
+            self._health_task.cancel()
+            self._health_task = None
+
     async def _connect_async(self, config_path: Path) -> int:
         if not config_path.exists():
             return 0
@@ -209,14 +360,55 @@ class McpManager:
 
         for server in servers:
             name = server.get("name", "desconhecido")
+            self._server_configs[name] = server
             try:
-                await self._connect_server(server)
+                await self._connect_server_async(server)
             except Exception as exc:
                 self._errors.append(f"{name}: {exc}")
 
         return len(self._tool_bindings)
 
-    async def _connect_server(self, server: dict[str, Any]) -> None:
+    async def _connect_server_async(self, server: dict[str, Any]) -> int:
+        name = server["name"]
+        self._server_configs[name] = server
+
+        if name in self._servers:
+            await self._disconnect_server_async(name)
+
+        previous_attempts = 0
+        if name in self._server_status:
+            previous_attempts = self._server_status[name].reconnect_attempts
+
+        self._server_status[name] = ServerStatus(
+            name=name,
+            state=ServerState.RECONNECTING,
+            reconnect_attempts=previous_attempts,
+        )
+
+        try:
+            connection = await self._establish_connection(server)
+            self._servers[name] = connection
+
+            tools_count = await self._register_tools(name, connection.session)
+            self._server_status[name] = ServerStatus(
+                name=name,
+                state=ServerState.CONNECTED,
+                tool_count=tools_count,
+                reconnect_attempts=previous_attempts,
+                last_health_check=time.time(),
+            )
+            return tools_count
+        except Exception as exc:
+            self._server_status[name] = ServerStatus(
+                name=name,
+                state=ServerState.DEGRADED,
+                last_error=str(exc),
+                reconnect_attempts=previous_attempts,
+            )
+            self._errors.append(f"{name}: {exc}")
+            raise
+
+    async def _establish_connection(self, server: dict[str, Any]) -> ServerConnection:
         name = server["name"]
         transport = server.get("transport", "stdio")
         stack = AsyncExitStack()
@@ -245,20 +437,43 @@ class McpManager:
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
-        self._servers[name] = ServerConnection(name=name, session=session, stack=stack)
+        return ServerConnection(name=name, session=session, stack=stack)
 
+    async def _register_tools(self, server_name: str, session: ClientSession) -> int:
         tools_response = await session.list_tools()
+        count = 0
         for tool in tools_response.tools:
-            registry_name = f"{name}__{tool.name}"
+            registry_name = f"{server_name}.{tool.name}"
             input_schema = tool.inputSchema or {"type": "object", "properties": {}}
 
             self._tool_bindings[registry_name] = McpToolBinding(
                 registry_name=registry_name,
-                server_name=name,
+                server_name=server_name,
                 tool_name=tool.name,
                 description=tool.description or f"Tool MCP {tool.name}",
                 input_schema=input_schema,
                 needs_confirmation=_tool_needs_confirmation(tool.name),
+            )
+            count += 1
+        return count
+
+    async def _disconnect_server_async(self, name: str) -> None:
+        connection = self._servers.pop(name, None)
+        if connection:
+            try:
+                await connection.stack.aclose()
+            except Exception:
+                pass
+
+        for key in list(self._tool_bindings):
+            if self._tool_bindings[key].server_name == name:
+                self._tool_bindings.pop(key, None)
+
+        if name in self._server_status:
+            self._server_status[name] = ServerStatus(
+                name=name,
+                state=ServerState.DISABLED,
+                tool_count=0,
             )
 
     async def _call_tool_async(
@@ -275,6 +490,10 @@ class McpManager:
         if connection is None:
             return f"Erro: servidor MCP desconectado: {binding.server_name}"
 
+        status = self._server_status.get(binding.server_name)
+        if status and status.state == ServerState.DISABLED:
+            return f"Erro: servidor MCP desabilitado: {binding.server_name}"
+
         if binding.needs_confirmation:
             if confirm is None:
                 return (
@@ -288,9 +507,84 @@ class McpManager:
             if not confirm(preview):
                 return "Operação cancelada pelo usuário."
 
-        result = await connection.session.call_tool(binding.tool_name, arguments=arguments)
-        return _format_call_result(result)
+        try:
+            result = await asyncio.wait_for(
+                connection.session.call_tool(binding.tool_name, arguments=arguments),
+                timeout=DEFAULT_TOOL_TIMEOUT,
+            )
+            return _format_call_result(result)
+        except asyncio.TimeoutError:
+            self._set_degraded(binding.server_name, f"Timeout na tool {binding.tool_name}")
+            return f"Erro: tool MCP excedeu o timeout de {DEFAULT_TOOL_TIMEOUT}s."
+        except Exception as exc:
+            self._set_degraded(binding.server_name, str(exc))
+            await self._schedule_reconnect(binding.server_name)
+            return f"Erro ao chamar tool MCP: {exc}"
+
+    def _set_degraded(self, server_name: str, error: str) -> None:
+        status = self._server_status.get(server_name)
+        if status:
+            status.state = ServerState.DEGRADED
+            status.last_error = error
+
+    async def _schedule_reconnect(self, server_name: str) -> None:
+        if not self._loop:
+            return
+
+        status = self._server_status.get(server_name)
+        if not status or status.state == ServerState.DISABLED:
+            return
+
+        status.state = ServerState.RECONNECTING
+        status.reconnect_attempts += 1
+
+        if status.reconnect_attempts > RECONNECT_MAX_ATTEMPTS:
+            status.state = ServerState.DISABLED
+            status.last_error = "Máximo de tentativas de reconexão excedido."
+            return
+
+        delay = min(
+            RECONNECT_BASE_DELAY * (2 ** (status.reconnect_attempts - 1)),
+            RECONNECT_MAX_DELAY,
+        )
+
+        config = self._server_configs.get(server_name)
+        if config:
+            await asyncio.sleep(delay)
+            try:
+                await self._connect_server_async(config)
+            except Exception as exc:
+                status.state = ServerState.DEGRADED
+                status.last_error = f"Reconexão falhou (tentativa {status.reconnect_attempts}): {exc}"
+
+    async def _health_check_all(self) -> None:
+        for name in list(self._servers):
+            await self._health_check_server(name)
+
+    async def _health_check_server(self, name: str) -> None:
+        connection = self._servers.get(name)
+        if not connection:
+            return
+
+        status = self._server_status.get(name)
+        if not status:
+            return
+
+        try:
+            await asyncio.wait_for(
+                connection.session.list_tools(),
+                timeout=10,
+            )
+            status.state = ServerState.CONNECTED
+            status.last_error = ""
+            status.last_health_check = time.time()
+        except Exception as exc:
+            self._set_degraded(name, str(exc))
+            await self._schedule_reconnect(name)
 
     async def _disconnect_async(self) -> None:
         for connection in list(self._servers.values()):
-            await connection.stack.aclose()
+            try:
+                await connection.stack.aclose()
+            except Exception:
+                pass

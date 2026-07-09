@@ -5,6 +5,7 @@ import { ChatPage } from "./pages/Chat";
 import { IntegrationsPage } from "./pages/Integrations";
 import { LogsPage } from "./pages/Logs";
 import { MemoryPage } from "./pages/Memory";
+import { MetricsPage } from "./pages/Metrics";
 import { TokensPage } from "./pages/Tokens";
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
           <Route path="tokens" element={<TokensPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="memory" element={<MemoryPage />} />
+          <Route path="metrics" element={<MetricsPage />} />
           <Route path="logs" element={<LogsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

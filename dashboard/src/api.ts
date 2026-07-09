@@ -1,12 +1,33 @@
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8420";
+/** Token local da API (mesmo valor de NULLAIN_API_TOKEN no backend). */
+export const API_TOKEN = (import.meta.env.VITE_NULLAIN_API_TOKEN as string | undefined) ?? "";
+
+function authHeaders(extra?: HeadersInit): HeadersInit {
+  const headers: Record<string, string> = {
+    ...(extra as Record<string, string> | undefined),
+  };
+  if (API_TOKEN) {
+    headers.Authorization = `Bearer ${API_TOKEN}`;
+  }
+  return headers;
+}
+
+export function wsChatUrl(): string {
+  const wsBase = API_BASE.replace(/^http/, "ws");
+  if (!API_TOKEN) {
+    return `${wsBase}/ws/chat`;
+  }
+  const params = new URLSearchParams({ token: API_TOKEN });
+  return `${wsBase}/ws/chat?${params.toString()}`;
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: {
+    ...options,
+    headers: authHeaders({
       "Content-Type": "application/json",
       ...(options?.headers ?? {}),
-    },
-    ...options,
+    }),
   });
 
   if (!response.ok) {
@@ -64,6 +85,66 @@ export type ToolLog = {
   created_at: string;
 };
 
+export type MetricTurn = {
+  id: number;
+  session_id: string | null;
+  turn_index: number;
+  ttft_ms: number | null;
+  total_ms: number;
+  iterations: number;
+  tokens_in: number | null;
+  tokens_out: number | null;
+  tool_count: number;
+  tool_total_ms: number;
+  model: string | null;
+  created_at: string;
+};
+
+export type MetricPercentile = {
+  p50: number | null;
+  p90: number | null;
+  p95: number | null;
+  p99: number | null;
+  count: number;
+};
+
+export type MetricsResponse = {
+  turns: MetricTurn[];
+  percentiles: {
+    ttft_ms: MetricPercentile;
+    total_ms: MetricPercentile;
+    tool_total_ms: MetricPercentile;
+  };
+};
+
+export type SessionInfo = {
+  session_id: string;
+  first_at: string;
+  last_at: string;
+  message_count: number;
+  user_count: number;
+};
+
+export type SessionMessage = {
+  id: number;
+  session_id: string;
+  role: string;
+  content: string;
+  created_at: string;
+};
+
+export type McpServerStatus = {
+  name: string;
+  state: string;
+  last_error: string;
+  tool_count: number;
+  reconnect_attempts: number;
+};
+
+export type McpServerWithStatus = McpServer & {
+  status?: McpServerStatus;
+};
+
 export const api = {
   getConfig: () => request<RuntimeConfig>("/config"),
   putConfig: (payload: Partial<RuntimeConfig>) =>
@@ -88,7 +169,7 @@ export const api = {
   deleteFact: (id: number) =>
     request<{ deleted: boolean }>(`/memory/facts/${id}`, { method: "DELETE" }),
   getTools: () => request<ToolInfo[]>("/tools"),
-  getMcpServers: () => request<McpServer[]>("/mcp/servers"),
+  getMcpServers: () => request<McpServerWithStatus[]>("/mcp/servers"),
   addMcpServer: (server: McpServer) =>
     request<McpServer>("/mcp/servers", {
       method: "POST",
@@ -97,11 +178,18 @@ export const api = {
   deleteMcpServer: (name: string) =>
     request<{ deleted: boolean }>(`/mcp/servers/${name}`, { method: "DELETE" }),
   getLogs: (limit = 50) => request<ToolLog[]>(`/logs?limit=${limit}`),
+  getMetrics: (limit = 50) =>
+    request<MetricsResponse>(`/metrics?limit=${limit}`),
+  getSessions: (limit = 20) =>
+    request<SessionInfo[]>(`/sessions?limit=${limit}`),
+  getSessionMessages: (sessionId: string, limit = 100) =>
+    request<SessionMessage[]>(`/sessions/${sessionId}?limit=${limit}`),
   transcribeAudio: async (blob: Blob) => {
     const form = new FormData();
     form.append("file", blob, "audio.webm");
     const response = await fetch(`${API_BASE}/voice/transcribe`, {
       method: "POST",
+      headers: authHeaders(),
       body: form,
     });
     if (!response.ok) {
@@ -112,7 +200,7 @@ export const api = {
   speakText: async (text: string) => {
     const response = await fetch(`${API_BASE}/voice/speak`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ text }),
     });
     if (!response.ok) {

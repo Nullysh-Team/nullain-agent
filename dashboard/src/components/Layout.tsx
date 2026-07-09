@@ -6,6 +6,7 @@ const links = [
   { to: "/tokens", label: "Tokens", end: false },
   { to: "/integrations", label: "Integrações", end: false },
   { to: "/memory", label: "Memória", end: false },
+  { to: "/metrics", label: "Métricas", end: false },
   { to: "/logs", label: "Logs", end: false },
 ];
 

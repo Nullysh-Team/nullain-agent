@@ -96,6 +96,62 @@ que amplifica o loop agêntico em fluxos de engenharia de ponta a ponta.
 
 ## ◻ Quick start
 
+Requisitos: **Python 3.13+**, [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com/) (recomendado para dev local).
+
+```bash
+# 1. Dependências
+uv sync --group dev
+cp .env.example .env
+
+# 2. Modelo local (Ollama)
+ollama pull llama3.2
+ollama pull nomic-embed-text   # busca semântica de fatos (opcional)
+
+# 3. Chat no terminal
+uv run nullain chat
+
+# 4. Diagnóstico do ambiente
+uv run nullain doctor
+
+# 5. API + dashboard
+uv run nullain serve                 # http://127.0.0.1:8420
+cd dashboard && npm install && npm run dev   # http://localhost:5173
+```
+
+### Auth local (recomendado)
+
+No `.env` do backend:
+
+```env
+NULLAIN_API_TOKEN=troque-por-um-segredo-longo
+```
+
+No dashboard (`dashboard/.env` ou `.env.local`):
+
+```env
+VITE_NULLAIN_API_TOKEN=troque-por-um-segredo-longo
+VITE_API_URL=http://127.0.0.1:8420
+```
+
+Sem token, a API aceita qualquer processo em `127.0.0.1` (ok só em dev isolado). Com token, REST usa `Authorization: Bearer …` e o WebSocket `?token=…`.
+
+### Voz offline (opcional)
+
+```bash
+uv run nullain voice-setup    # baixa voz Piper pt_BR
+uv run nullain chat --voice   # ou: uv run nullain voice
+```
+
+Transcrição no browser (webm) pode exigir **ffmpeg** no PATH.
+
+### MCP
+
+```bash
+cp mcp.config.example.json mcp.config.json
+# edite servidores; tokens via ${VAR} no env
+```
+
+Tools MCP com nome ambíguo **exigem confirmação por padrão** (fail-closed). Só nomes claramente de leitura (`list`, `get`, `search`, …) passam sem modal.
 
 ## ◻ Roadmap
 

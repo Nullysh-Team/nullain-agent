@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+import queue
 import struct
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +21,11 @@ DB_PATH = Path("nullain.db")
 _VEC_TABLE = "vec_facts"
 _EMBED_DIM_KEY = "embed_dim"
 VEC_AVAILABLE = False
+
+_WAL_ENABLED = False
+_BG_QUEUE: queue.Queue | None = None
+_BG_THREAD: threading.Thread | None = None
+_BG_STOP = threading.Event()
 
 
 @dataclass
@@ -55,8 +63,25 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    if _WAL_ENABLED:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except Exception:
+            pass
     _load_vec_extension(conn)
     return conn
+
+
+def _enable_wal() -> None:
+    global _WAL_ENABLED
+    try:
+        with _connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        _WAL_ENABLED = True
+    except Exception:
+        _WAL_ENABLED = False
 
 
 def _get_embed_dim(conn: sqlite3.Connection | None = None) -> int | None:
@@ -181,6 +206,8 @@ def _has_vector_index() -> bool:
 
 
 def init_db() -> None:
+    _enable_wal()
+
     with _connect() as conn:
         conn.executescript(
             """
@@ -191,6 +218,9 @@ def init_db() -> None:
                 content TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_session
+                ON messages (session_id);
 
             CREATE TABLE IF NOT EXISTS facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -212,10 +242,38 @@ def init_db() -> None:
                 session_id TEXT,
                 created_at TEXT NOT NULL
             );
+
+            CREATE INDEX IF NOT EXISTS idx_tool_logs_session
+                ON tool_logs (session_id);
+
+            CREATE INDEX IF NOT EXISTS idx_tool_logs_created
+                ON tool_logs (created_at);
+
+            CREATE TABLE IF NOT EXISTS metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                turn_index INTEGER NOT NULL,
+                ttft_ms REAL,
+                total_ms REAL NOT NULL,
+                iterations INTEGER NOT NULL DEFAULT 0,
+                tokens_in INTEGER,
+                tokens_out INTEGER,
+                tool_count INTEGER NOT NULL DEFAULT 0,
+                tool_total_ms REAL NOT NULL DEFAULT 0,
+                model TEXT,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_metrics_session
+                ON metrics (session_id);
+
+            CREATE INDEX IF NOT EXISTS idx_metrics_created
+                ON metrics (created_at);
             """
         )
 
-    backfill_pending_embeddings()
+    start_background_writer()
+    backfill_pending_embeddings_background()
 
 
 def backfill_pending_embeddings() -> None:
@@ -234,7 +292,182 @@ def backfill_pending_embeddings() -> None:
         return
 
 
+def backfill_pending_embeddings_background() -> None:
+    enqueue_background(backfill_pending_embeddings)
+
+
+def start_background_writer() -> None:
+    global _BG_QUEUE, _BG_THREAD
+
+    if _BG_THREAD is not None and _BG_THREAD.is_alive():
+        return
+
+    if _BG_QUEUE is None:
+        _BG_QUEUE = queue.Queue()
+
+    _BG_STOP.clear()
+
+    def _worker() -> None:
+        while not _BG_STOP.is_set():
+            try:
+                task = _BG_QUEUE.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            if task is None:
+                break
+            fn, args = task
+            try:
+                fn(*args)
+            except Exception:
+                pass
+
+    _BG_THREAD = threading.Thread(target=_worker, daemon=True)
+    _BG_THREAD.start()
+
+
+def stop_background_writer() -> None:
+    global _BG_QUEUE, _BG_THREAD
+    _BG_STOP.set()
+    if _BG_QUEUE is not None:
+        _BG_QUEUE.put(None)
+    if _BG_THREAD is not None:
+        _BG_THREAD.join(timeout=2)
+    _BG_QUEUE = None
+    _BG_THREAD = None
+
+
+def enqueue_background(fn, *args) -> None:
+    if _BG_QUEUE is not None:
+        _BG_QUEUE.put((fn, args))
+    else:
+        try:
+            fn(*args)
+        except Exception:
+            pass
+
+
+@dataclass
+class TurnMetrics:
+    session_id: str | None = None
+    turn_index: int = 0
+    ttft_ms: float | None = None
+    total_ms: float = 0.0
+    iterations: int = 0
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    tool_count: int = 0
+    tool_total_ms: float = 0.0
+    model: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+def log_turn_metrics(metrics: TurnMetrics) -> None:
+    enqueue_background(_log_turn_metrics_sync, metrics)
+
+
+def _log_turn_metrics_sync(metrics: TurnMetrics) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO metrics (
+                session_id, turn_index, ttft_ms, total_ms, iterations,
+                tokens_in, tokens_out, tool_count, tool_total_ms, model, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                metrics.session_id,
+                metrics.turn_index,
+                metrics.ttft_ms,
+                metrics.total_ms,
+                metrics.iterations,
+                metrics.tokens_in,
+                metrics.tokens_out,
+                metrics.tool_count,
+                metrics.tool_total_ms,
+                metrics.model,
+                metrics.created_at,
+            ),
+        )
+
+
+def get_metrics(limit: int = 50) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, turn_index, ttft_ms, total_ms, iterations, "
+            "tokens_in, tokens_out, tool_count, tool_total_ms, model, created_at "
+            "FROM metrics ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_metric_percentiles(field: str = "ttft_ms", limit: int = 100) -> dict[str, float | None]:
+    if field not in ("ttft_ms", "total_ms", "tool_total_ms"):
+        field = "ttft_ms"
+
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT {field} AS value FROM metrics "
+            f"WHERE {field} IS NOT NULL "
+            f"ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    values = [float(row["value"]) for row in rows if row["value"] is not None]
+    if not values:
+        return {"p50": None, "p90": None, "p95": None, "p99": None, "count": 0}
+
+    def percentile(data: list[float], pct: float) -> float:
+        sorted_data = sorted(data)
+        index = max(0, min(len(sorted_data) - 1, int(len(sorted_data) * pct / 100)))
+        return sorted_data[index]
+
+    return {
+        "p50": percentile(values, 50),
+        "p90": percentile(values, 90),
+        "p95": percentile(values, 95),
+        "p99": percentile(values, 99),
+        "count": len(values),
+    }
+
+
+def list_sessions(limit: int = 20) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT session_id,
+                   MIN(created_at) AS first_at,
+                   MAX(created_at) AS last_at,
+                   COUNT(*) AS message_count,
+                   SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS user_count
+            FROM messages
+            GROUP BY session_id
+            ORDER BY last_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_session_messages(session_id: str, limit: int = 100) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, role, content, created_at "
+            "FROM messages WHERE session_id = ? ORDER BY id ASC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
 def add_message(session_id: str, role: str, content: str) -> None:
+    enqueue_background(_add_message_sync, session_id, role, content)
+
+
+def _add_message_sync(session_id: str, role: str, content: str) -> None:
     with _connect() as conn:
         conn.execute(
             "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
@@ -376,8 +609,15 @@ def log_tool_call(
     result: str,
     session_id: str | None = None,
 ) -> None:
-    import json
+    enqueue_background(_log_tool_call_sync, tool_name, arguments, result, session_id)
 
+
+def _log_tool_call_sync(
+    tool_name: str,
+    arguments: dict,
+    result: str,
+    session_id: str | None = None,
+) -> None:
     with _connect() as conn:
         conn.execute(
             "INSERT INTO tool_logs (tool_name, arguments, result, session_id, created_at) "
@@ -393,8 +633,6 @@ def log_tool_call(
 
 
 def get_tool_logs(limit: int = 50) -> list[dict]:
-    import json
-
     with _connect() as conn:
         rows = conn.execute(
             "SELECT id, tool_name, arguments, result, session_id, created_at "

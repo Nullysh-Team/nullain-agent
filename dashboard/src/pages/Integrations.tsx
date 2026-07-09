@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type McpServer, type ToolInfo } from "../api";
+import { api, type McpServer, type McpServerWithStatus, type ToolInfo } from "../api";
 import { Field } from "../components/Field";
 import { Panel } from "../components/Panel";
 
@@ -12,7 +12,7 @@ const emptyServer: McpServer = {
 };
 
 export function IntegrationsPage() {
-  const [servers, setServers] = useState<McpServer[]>([]);
+  const [servers, setServers] = useState<McpServerWithStatus[]>([]);
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [draft, setDraft] = useState<McpServer>(emptyServer);
   const [argsText, setArgsText] = useState("");
@@ -35,7 +35,8 @@ export function IntegrationsPage() {
     const map = new Map<string, ToolInfo[]>();
     for (const tool of tools) {
       if (tool.source !== "mcp") continue;
-      const [serverName] = tool.name.split("__");
+      const dotIndex = tool.name.indexOf(".");
+      const serverName = dotIndex > 0 ? tool.name.slice(0, dotIndex) : tool.name;
       const current = map.get(serverName) ?? [];
       current.push(tool);
       map.set(serverName, current);
@@ -170,9 +171,27 @@ export function IntegrationsPage() {
                         {server.command ? ` · ${server.command}` : ""}
                         {server.url ? ` · ${server.url}` : ""}
                       </p>
-                      <p className="mt-2 text-xs uppercase tracking-wide text-[#666]">
-                        Status: {connected ? "conectado" : "sem tools carregadas"}
+                      <p className="mt-2 text-xs tracking-wide text-[#666] uppercase">
+                        Estado:{" "}
+                        <span className={
+                          server.status?.state === "connected" ? "text-white" :
+                          server.status?.state === "degraded" ? "text-[#999]" :
+                          server.status?.state === "reconnecting" ? "text-[#999]" :
+                          "text-[#666]"
+                        }>
+                          {server.status?.state ?? (connected ? "connected" : "desconhecido")}
+                        </span>
+                        {server.status?.tool_count !== undefined && (
+                          <span className="ml-2 text-[#666]">
+                            ({server.status.tool_count} tools)
+                          </span>
+                        )}
                       </p>
+                      {server.status?.last_error && (
+                        <p className="mt-1 font-mono text-xs text-[#999]">
+                          {server.status.last_error.slice(0, 100)}
+                        </p>
+                      )}
                     </div>
                     <button
                       type="button"
